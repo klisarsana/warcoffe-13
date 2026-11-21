@@ -574,6 +574,12 @@ export default function AIAssistantPage() {
                     Status Layanan AI: {draftResult.status}
                   </p>
                   <p className="mt-1">{draftResult.assistant_message}</p>
+                  {draftResult.missing_fields.length > 0 && (
+                    <p className="mt-2 font-semibold">
+                      Data yang masih kurang:{" "}
+                      {draftResult.missing_fields.join(", ")}
+                    </p>
+                  )}
                 </div>
 
                 {draftResult.status === "SUCCESS" && (
@@ -590,7 +596,60 @@ export default function AIAssistantPage() {
                         {draftResult.predicted_category}
                       </span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-espresso-600">Model Digunakan:</span>
+                      <span className="font-semibold text-right">
+                        {draftResult.classifier_model_used || "-"}
+                      </span>
+                    </div>
+                    {typeof draftResult.confidence_score === "number" && (
+                      <div className="flex justify-between">
+                        <span className="text-espresso-600">
+                          Confidence Model:
+                        </span>
+                        <span className="font-bold">
+                          {(draftResult.confidence_score * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    )}
+                    {draftResult.expense_description && (
+                      <div className="flex justify-between gap-4">
+                        <span className="text-espresso-600">
+                          Deskripsi Pengeluaran:
+                        </span>
+                        <span className="font-semibold text-right">
+                          {draftResult.expense_description}
+                        </span>
+                      </div>
+                    )}
+                    {draftResult.draft_type === "INCOME_SALE" &&
+                      draftResult.items.length > 0 && (
+                        <div className="pt-2 space-y-1.5">
+                          <p className="text-espresso-600 font-semibold">
+                            Item Terdeteksi:
+                          </p>
+                          {draftResult.items.map((item, idx) => (
+                            <div
+                              key={`${item.item_name}-${idx}`}
+                              className="flex justify-between gap-3 rounded-lg bg-white/70 border border-espresso-200 px-3 py-2"
+                            >
+                              <div>
+                                <p className="font-bold text-espresso-900">
+                                  {item.quantity}x {item.item_name}
+                                </p>
+                                <p className="text-[11px] text-espresso-600">
+                                  {item.variant_label} · confidence{" "}
+                                  {(item.confidence * 100).toFixed(0)}%
+                                </p>
+                              </div>
+                              <span className="font-semibold whitespace-nowrap">
+                                {formatIDR(item.line_total)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    <div className="flex justify-between border-t border-espresso-200 pt-2">
                       <span className="text-espresso-600">Estimasi Nominal:</span>
                       <span className="font-bold">
                         {formatIDR(draftResult.total_amount)}
@@ -678,11 +737,11 @@ export default function AIAssistantPage() {
 
 // Expected Response Body dari FastAPI (AE/DS):
 {
-  "status": "SUCCESS", // "SUCCESS" | "INCOMPLETE" | "OUT_OF_CONTEXT"
-  "draft_type": "INCOME_SALE", // "INCOME_SALE" | "EXPENSE"
+  "status": "SUCCESS", // "SUCCESS" | "INCOMPLETE" | "OUT_OF_CONTEXT" | "SERVICE_UNAVAILABLE"
+  "draft_type": "INCOME_SALE", // "INCOME_SALE" | "EXPENSE" | "UNKNOWN"
   "predicted_category": "Minuman Racikan / Sachet",
-  "classifier_model_used": "IndoBERT-v1",
-  "confidence_score": 0.94,
+  "classifier_model_used": "TF-IDF (word + char n-gram) + Logistic Regression",
+  "confidence_score": 0.97,
   "transaction_date": "2026-11-20",
   "items": [
     {

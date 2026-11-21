@@ -1,0 +1,399 @@
+{
+  "best_model": "logreg",
+  "best_model_label": "TF-IDF (word + char n-gram) + Logistic Regression",
+  "selection_metric": "macro_f1_manual_test",
+  "classes": [
+    "Makanan",
+    "Minuman Kemasan",
+    "Minuman Racikan / Sachet"
+  ],
+  "dataset": {
+    "total_samples": 1293,
+    "samples_per_class": {
+      "Minuman Racikan / Sachet": 524,
+      "Minuman Kemasan": 453,
+      "Makanan": 316
+    },
+    "random_train": 1034,
+    "random_test": 259,
+    "group_train": 1028,
+    "group_test": 265,
+    "manual_test": 40
+  },
+  "metrics": {
+    "logreg": {
+      "label": "TF-IDF (word + char n-gram) + Logistic Regression",
+      "random_split": {
+        "accuracy": 0.9845559845559846,
+        "macro_precision": 0.9860110658732645,
+        "macro_recall": 0.9868131868131869,
+        "macro_f1": 0.9863433667781494,
+        "weighted_f1": 0.984565669348278,
+        "latency_ms": 0.16137201930676623,
+        "report": {
+          "Makanan": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 63.0
+          },
+          "Minuman Kemasan": {
+            "precision": 0.967741935483871,
+            "recall": 0.989010989010989,
+            "f1-score": 0.9782608695652174,
+            "support": 91.0
+          },
+          "Minuman Racikan / Sachet": {
+            "precision": 0.9902912621359223,
+            "recall": 0.9714285714285714,
+            "f1-score": 0.9807692307692307,
+            "support": 105.0
+          },
+          "accuracy": 0.9845559845559846,
+          "macro avg": {
+            "precision": 0.9860110658732645,
+            "recall": 0.9868131868131869,
+            "f1-score": 0.9863433667781494,
+            "support": 259.0
+          },
+          "weighted avg": {
+            "precision": 0.9847301106305176,
+            "recall": 0.9845559845559846,
+            "f1-score": 0.984565669348278,
+            "support": 259.0
+          }
+        },
+        "confusion_matrix": [
+          [
+            63,
+            0,
+            0
+          ],
+          [
+            0,
+            90,
+            1
+          ],
+          [
+            0,
+            3,
+            102
+          ]
+        ]
+      },
+      "group_split": {
+        "accuracy": 0.6792452830188679,
+        "macro_precision": 0.7159410852387503,
+        "macro_recall": 0.6546945391772978,
+        "macro_f1": 0.6713181725963224,
+        "weighted_f1": 0.673466329946997,
+        "latency_ms": 0.12666406415038817,
+        "report": {
+          "Makanan": {
+            "precision": 0.9555555555555556,
+            "recall": 0.6615384615384615,
+            "f1-score": 0.7818181818181819,
+            "support": 65.0
+          },
+          "Minuman Kemasan": {
+            "precision": 0.5211267605633803,
+            "recall": 0.44047619047619047,
+            "f1-score": 0.4774193548387097,
+            "support": 84.0
+          },
+          "Minuman Racikan / Sachet": {
+            "precision": 0.6711409395973155,
+            "recall": 0.8620689655172413,
+            "f1-score": 0.7547169811320755,
+            "support": 116.0
+          },
+          "accuracy": 0.6792452830188679,
+          "macro avg": {
+            "precision": 0.7159410852387503,
+            "recall": 0.6546945391772978,
+            "f1-score": 0.6713181725963224,
+            "support": 265.0
+          },
+          "weighted avg": {
+            "precision": 0.6933513509121648,
+            "recall": 0.6792452830188679,
+            "f1-score": 0.673466329946997,
+            "support": 265.0
+          }
+        },
+        "confusion_matrix": [
+          [
+            43,
+            20,
+            2
+          ],
+          [
+            0,
+            37,
+            47
+          ],
+          [
+            2,
+            14,
+            100
+          ]
+        ]
+      },
+      "manual_test": {
+        "accuracy": 1.0,
+        "macro_precision": 1.0,
+        "macro_recall": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "latency_ms": 0.12461222499950964,
+        "report": {
+          "Makanan": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 14.0
+          },
+          "Minuman Kemasan": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 11.0
+          },
+          "Minuman Racikan / Sachet": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 15.0
+          },
+          "accuracy": 1.0,
+          "macro avg": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 40.0
+          },
+          "weighted avg": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 40.0
+          }
+        },
+        "confusion_matrix": [
+          [
+            14,
+            0,
+            0
+          ],
+          [
+            0,
+            11,
+            0
+          ],
+          [
+            0,
+            0,
+            15
+          ]
+        ]
+      },
+      "cv_macro_f1_mean": 0.6977251432927898,
+      "cv_macro_f1_std": 0.1359019813548059
+    },
+    "linearsvc": {
+      "label": "TF-IDF (word + char n-gram) + Linear SVC",
+      "random_split": {
+        "accuracy": 0.9806949806949807,
+        "macro_precision": 0.9825476289806704,
+        "macro_recall": 0.9836385836385837,
+        "macro_f1": 0.9829394612003308,
+        "weighted_f1": 0.9807116164342957,
+        "latency_ms": 0.06423870270308688,
+        "report": {
+          "Makanan": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 63.0
+          },
+          "Minuman Kemasan": {
+            "precision": 0.9574468085106383,
+            "recall": 0.989010989010989,
+            "f1-score": 0.972972972972973,
+            "support": 91.0
+          },
+          "Minuman Racikan / Sachet": {
+            "precision": 0.9901960784313726,
+            "recall": 0.9619047619047619,
+            "f1-score": 0.9758454106280193,
+            "support": 105.0
+          },
+          "accuracy": 0.9806949806949807,
+          "macro avg": {
+            "precision": 0.9825476289806704,
+            "recall": 0.9836385836385837,
+            "f1-score": 0.9829394612003308,
+            "support": 259.0
+          },
+          "weighted avg": {
+            "precision": 0.9810743158678077,
+            "recall": 0.9806949806949807,
+            "f1-score": 0.9807116164342957,
+            "support": 259.0
+          }
+        },
+        "confusion_matrix": [
+          [
+            63,
+            0,
+            0
+          ],
+          [
+            0,
+            90,
+            1
+          ],
+          [
+            0,
+            4,
+            101
+          ]
+        ]
+      },
+      "group_split": {
+        "accuracy": 0.6528301886792452,
+        "macro_precision": 0.7076857020180335,
+        "macro_recall": 0.6367689781482885,
+        "macro_f1": 0.6590674489225213,
+        "weighted_f1": 0.6565099258290399,
+        "latency_ms": 0.06541606415099385,
+        "report": {
+          "Makanan": {
+            "precision": 1.0,
+            "recall": 0.6615384615384615,
+            "f1-score": 0.7962962962962963,
+            "support": 65.0
+          },
+          "Minuman Kemasan": {
+            "precision": 0.4588235294117647,
+            "recall": 0.4642857142857143,
+            "f1-score": 0.46153846153846156,
+            "support": 84.0
+          },
+          "Minuman Racikan / Sachet": {
+            "precision": 0.6642335766423357,
+            "recall": 0.7844827586206896,
+            "f1-score": 0.7193675889328063,
+            "support": 116.0
+          },
+          "accuracy": 0.6528301886792452,
+          "macro avg": {
+            "precision": 0.7076857020180335,
+            "recall": 0.6367689781482885,
+            "f1-score": 0.6590674489225213,
+            "support": 265.0
+          },
+          "weighted avg": {
+            "precision": 0.6814802692871667,
+            "recall": 0.6528301886792452,
+            "f1-score": 0.6565099258290399,
+            "support": 265.0
+          }
+        },
+        "confusion_matrix": [
+          [
+            43,
+            21,
+            1
+          ],
+          [
+            0,
+            39,
+            45
+          ],
+          [
+            0,
+            25,
+            91
+          ]
+        ]
+      },
+      "manual_test": {
+        "accuracy": 1.0,
+        "macro_precision": 1.0,
+        "macro_recall": 1.0,
+        "macro_f1": 1.0,
+        "weighted_f1": 1.0,
+        "latency_ms": 0.11211242501758534,
+        "report": {
+          "Makanan": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 14.0
+          },
+          "Minuman Kemasan": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 11.0
+          },
+          "Minuman Racikan / Sachet": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 15.0
+          },
+          "accuracy": 1.0,
+          "macro avg": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 40.0
+          },
+          "weighted avg": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1-score": 1.0,
+            "support": 40.0
+          }
+        },
+        "confusion_matrix": [
+          [
+            14,
+            0,
+            0
+          ],
+          [
+            0,
+            11,
+            0
+          ],
+          [
+            0,
+            0,
+            15
+          ]
+        ]
+      },
+      "cv_macro_f1_mean": 0.6942777094625506,
+      "cv_macro_f1_std": 0.13276791109205724
+    }
+  },
+  "hyperparameters": {
+    "tfidf_word_ngram_range": [
+      1,
+      2
+    ],
+    "tfidf_char_ngram_range": [
+      3,
+      5
+    ],
+    "tfidf_sublinear_tf": true,
+    "class_weight": "balanced",
+    "C": 1.0
+  },
+  "trained_at": "2026-11-21T11:35:55.295770+00:00",
+  "sklearn_version": "1.9.1",
+  "python_version": "3.15.2"
+}

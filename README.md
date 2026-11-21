@@ -59,6 +59,7 @@
 - **Styling & UI:** Tailwind CSS (Tema hangat Espresso, Cream, Caramel) + Lucide React Icons
 - **Visualisasi Data:** Recharts
 - **Database & Persistence:** Supabase PostgreSQL (dilengkapi *Local Fallback Persistence* otomatis jika kredensial Supabase belum diisi)
+- **Layanan AI Text-to-Draft:** Python + FastAPI + scikit-learn (TF-IDF word + char n-gram dengan Logistic Regression / Linear SVC)
 - **Lokalisasi:** Bahasa Indonesia (`id-ID`) & format mata uang Rupiah (`IDR` integer)
 
 ---
@@ -110,6 +111,31 @@
   ```bash
   npm run build
   ```
+
+### Menjalankan Layanan AI Text-to-Draft (Opsional)
+
+Fitur input teks ke draft transaksi membutuhkan service Python di folder [`ai-service/`](./ai-service/). Detail lengkap ada di [`ai-service/README.md`](./ai-service/README.md).
+
+```bash
+cd ai-service
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+Di terminal lain, dari root repository:
+
+```bash
+# pastikan .env.local berisi AI_SERVICE_URL=http://localhost:8000
+npm run dev
+```
+
+Katalog menu untuk service dapat diekspor ulang dengan:
+
+```bash
+npm run ai:export-catalog
+```
 
 ---
 

@@ -10,7 +10,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "npx tsx scripts/test-calculations.ts",
-    "seed": "npx tsx scripts/seed-menu.ts"
+    "seed": "npx tsx scripts/seed-menu.ts",
+    "ai:export-catalog": "npx tsx scripts/export-ai-catalog.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
