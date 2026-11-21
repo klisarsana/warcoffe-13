@@ -19,6 +19,7 @@ import {
   LogOut,
   Loader2,
   UserCheck,
+  ShieldCheck,
 } from "lucide-react";
 import { useWarcoffe } from "@/context/warcoffe-context";
 import { useAuth } from "@/context/auth-context";
@@ -86,6 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/expenses", label: "Pengeluaran", icon: Wallet },
     { href: "/reports", label: "Laporan Bulanan", icon: BarChart3 },
     { href: "/ai-assistant", label: "AI Assistant", icon: Bot },
+    { href: "/audit-log", label: "Audit Log", icon: ShieldCheck },
   ];
 
   const handleLogout = async () => {

@@ -2,6 +2,9 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import {
+  AuditActionType,
+  AuditEntityType,
+  AuditLogRecord,
   CartItem,
   ExpenseRecord,
   MenuCategory,
@@ -28,6 +31,7 @@ import {
   validateSaleTransactionInput,
 } from "@/lib/calculations";
 import { useAuth } from "@/context/auth-context";
+import { formatIDR } from "@/lib/format";
 
 interface CreateSaleParams {
   cart: CartItem[];
@@ -76,6 +80,7 @@ interface WarcoffeContextValue {
   transactions: SalesTransaction[];
   expenses: ExpenseRecord[];
   stockMovements: StockMovement[];
+  auditLogs: AuditLogRecord[];
 
   // Menu & Category CRUD
   createCategory: (name: string) => Promise<{ ok: boolean; error?: string }>;
@@ -118,8 +123,17 @@ interface WarcoffeContextValue {
 
 const WarcoffeContext = createContext<WarcoffeContextValue | null>(null);
 
+function toPlainSnapshot(obj: unknown): Record<string, unknown> | null {
+  if (!obj || typeof obj !== "object") return null;
+  try {
+    return JSON.parse(JSON.stringify(obj)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
-  const { authStatus } = useAuth();
+  const { authStatus, user } = useAuth();
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [storageMode, setStorageMode] = useState<"SUPABASE" | "LOCAL_FALLBACK">("LOCAL_FALLBACK");
   const [connectionWarning, setConnectionWarning] = useState<string | undefined>(undefined);
@@ -130,6 +144,7 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
   const [transactions, setTransactions] = useState<SalesTransaction[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -141,6 +156,7 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
       setTransactions([]);
       setExpenses([]);
       setStockMovements([]);
+      setAuditLogs([]);
       setIsLoading(authStatus === "LOADING");
       return () => {
         mounted = false;
@@ -156,6 +172,7 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
         setTransactions(data.transactions);
         setExpenses(data.expenses);
         setStockMovements(data.stockMovements);
+        setAuditLogs(data.auditLogs);
         setStorageMode(data.storageMode);
         setConnectionWarning(data.connectionWarning);
       })
@@ -166,6 +183,43 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
       mounted = false;
     };
   }, [authStatus]);
+
+  // ==========================================================================
+  // 0. AUTOMATIC AUDIT LOG RECORDER (APPEND-ONLY)
+  // ==========================================================================
+  const appendAuditLog = async (params: {
+    action_type: AuditActionType;
+    entity_type: AuditEntityType;
+    entity_id: string;
+    summary: string;
+    before_data?: unknown;
+    after_data?: unknown;
+  }) => {
+    const newLog: AuditLogRecord = {
+      id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      action_type: params.action_type,
+      entity_type: params.entity_type,
+      entity_id: params.entity_id,
+      actor_email: user?.email || "owner@warcoffe13.id",
+      summary: params.summary,
+      before_data: toPlainSnapshot(params.before_data ?? null),
+      after_data: toPlainSnapshot(params.after_data ?? null),
+      created_at: new Date().toISOString(),
+    };
+
+    if (storageMode === "SUPABASE" && supabaseClient) {
+      const { error } = await supabaseClient.from("audit_logs").insert(newLog);
+      if (error) {
+        console.warn("Audit log Supabase insert warning:", error.message);
+      }
+    }
+
+    setAuditLogs((prev) => {
+      const updated = [newLog, ...prev];
+      persistLocalState({ auditLogs: updated });
+      return updated;
+    });
+  };
 
   // ==========================================================================
   // 1. CATEGORIES & MENU MANAGEMENT
@@ -198,6 +252,16 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = [...categories, newCat];
     setCategories(updated);
     persistLocalState({ categories: updated });
+
+    await appendAuditLog({
+      action_type: "CREATE",
+      entity_type: "CATEGORY",
+      entity_id: newCat.id,
+      summary: `Menambahkan kategori menu baru "${newCat.name}"`,
+      before_data: null,
+      after_data: newCat,
+    });
+
     return { ok: true };
   };
 
@@ -209,6 +273,9 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     if (trimmed.length < 2) {
       return { ok: false, error: "Nama kategori minimal 2 karakter." };
     }
+    const existing = categories.find((c) => c.id === id);
+    if (!existing) return { ok: false, error: "Kategori tidak ditemukan." };
+
     if (storageMode === "SUPABASE" && supabaseClient) {
       const { error } = await supabaseClient
         .from("menu_categories")
@@ -217,13 +284,25 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
       if (error) return { ok: false, error: error.message };
     }
 
-    const updated = categories.map((c) => (c.id === id ? { ...c, name: trimmed } : c));
+    const updatedCat: MenuCategory = { ...existing, name: trimmed };
+    const updated = categories.map((c) => (c.id === id ? updatedCat : c));
     setCategories(updated);
     persistLocalState({ categories: updated });
+
+    await appendAuditLog({
+      action_type: "UPDATE",
+      entity_type: "CATEGORY",
+      entity_id: id,
+      summary: `Mengubah nama kategori dari "${existing.name}" menjadi "${trimmed}"`,
+      before_data: existing,
+      after_data: updatedCat,
+    });
+
     return { ok: true };
   };
 
   const deleteCategory = async (id: string): Promise<{ ok: boolean; error?: string }> => {
+    const existing = categories.find((c) => c.id === id);
     const hasItems = menuItems.some((m) => m.category_id === id);
     if (hasItems) {
       return {
@@ -240,6 +319,18 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = categories.filter((c) => c.id !== id);
     setCategories(updated);
     persistLocalState({ categories: updated });
+
+    if (existing) {
+      await appendAuditLog({
+        action_type: "DELETE",
+        entity_type: "CATEGORY",
+        entity_id: id,
+        summary: `Menghapus kategori menu "${existing.name}"`,
+        before_data: existing,
+        after_data: null,
+      });
+    }
+
     return { ok: true };
   };
 
@@ -269,6 +360,16 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = [...menuItems, newItem];
     setMenuItems(updated);
     persistLocalState({ menuItems: updated });
+
+    await appendAuditLog({
+      action_type: "CREATE",
+      entity_type: "MENU_ITEM",
+      entity_id: newItem.id,
+      summary: `Menambahkan item menu baru "${newItem.name}"`,
+      before_data: null,
+      after_data: newItem,
+    });
+
     return { ok: true };
   };
 
@@ -298,10 +399,22 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = menuItems.map((m) => (m.id === id ? merged : m));
     setMenuItems(updated);
     persistLocalState({ menuItems: updated });
+
+    await appendAuditLog({
+      action_type: "UPDATE",
+      entity_type: "MENU_ITEM",
+      entity_id: id,
+      summary: `Memperbarui data/harga/status menu "${merged.name}"`,
+      before_data: existing,
+      after_data: merged,
+    });
+
     return { ok: true };
   };
 
   const deleteMenuItem = async (id: string): Promise<{ ok: boolean; error?: string }> => {
+    const existing = menuItems.find((m) => m.id === id);
+
     if (storageMode === "SUPABASE" && supabaseClient) {
       const { error } = await supabaseClient.from("menu_items").delete().eq("id", id);
       if (error) return { ok: false, error: error.message };
@@ -310,6 +423,18 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = menuItems.filter((m) => m.id !== id);
     setMenuItems(updated);
     persistLocalState({ menuItems: updated });
+
+    if (existing) {
+      await appendAuditLog({
+        action_type: "DELETE",
+        entity_type: "MENU_ITEM",
+        entity_id: id,
+        summary: `Menghapus item menu "${existing.name}" dari katalog`,
+        before_data: existing,
+        after_data: null,
+      });
+    }
+
     return { ok: true };
   };
 
@@ -319,6 +444,15 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     persistLocalState({
       categories: INITIAL_MENU_CATEGORIES,
       menuItems: INITIAL_MENU_ITEMS,
+    });
+
+    await appendAuditLog({
+      action_type: "UPDATE",
+      entity_type: "MENU_ITEM",
+      entity_id: "seed-57-catalog",
+      summary: "Mereset katalog menu ke 57 entri seed resmi Warcoffe 13",
+      before_data: { total_items: menuItems.length },
+      after_data: { total_items: INITIAL_MENU_ITEMS.length },
     });
   };
 
@@ -393,6 +527,17 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = [newTransaction, ...transactions];
     setTransactions(updated);
     persistLocalState({ transactions: updated });
+
+    await appendAuditLog({
+      action_type:
+        newTransaction.source === "AI_DRAFT_CONFIRMED" ? "AI_CONFIRM" : "CREATE",
+      entity_type: "SALE_TRANSACTION",
+      entity_id: newTransaction.id,
+      summary: `Mencatat transaksi penjualan ${newTransaction.transaction_number} sebesar ${formatIDR(newTransaction.total_amount)} (${newTransaction.payment_method})`,
+      before_data: null,
+      after_data: newTransaction,
+    });
+
     return { ok: true, transaction: newTransaction };
   };
 
@@ -464,12 +609,24 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updatedList = transactions.map((t) => (t.id === params.id ? updatedTx : t));
     setTransactions(updatedList);
     persistLocalState({ transactions: updatedList });
+
+    await appendAuditLog({
+      action_type: "UPDATE",
+      entity_type: "SALE_TRANSACTION",
+      entity_id: updatedTx.id,
+      summary: `Mengubah transaksi penjualan ${updatedTx.transaction_number} dari ${formatIDR(existing.total_amount)} menjadi ${formatIDR(updatedTx.total_amount)}`,
+      before_data: existing,
+      after_data: updatedTx,
+    });
+
     return { ok: true };
   };
 
   const deleteSaleTransaction = async (
     id: string
   ): Promise<{ ok: boolean; error?: string }> => {
+    const existing = transactions.find((t) => t.id === id);
+
     if (storageMode === "SUPABASE" && supabaseClient) {
       const { error } = await supabaseClient.from("sales_transactions").delete().eq("id", id);
       if (error) return { ok: false, error: error.message };
@@ -478,6 +635,18 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = transactions.filter((t) => t.id !== id);
     setTransactions(updated);
     persistLocalState({ transactions: updated });
+
+    if (existing) {
+      await appendAuditLog({
+        action_type: "DELETE",
+        entity_type: "SALE_TRANSACTION",
+        entity_id: id,
+        summary: `Menghapus transaksi penjualan ${existing.transaction_number} senilai ${formatIDR(existing.total_amount)}`,
+        before_data: existing,
+        after_data: null,
+      });
+    }
+
     return { ok: true };
   };
 
@@ -521,6 +690,17 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = [newExpense, ...expenses];
     setExpenses(updated);
     persistLocalState({ expenses: updated });
+
+    await appendAuditLog({
+      action_type:
+        newExpense.source === "AI_DRAFT_CONFIRMED" ? "AI_CONFIRM" : "CREATE",
+      entity_type: "EXPENSE",
+      entity_id: newExpense.id,
+      summary: `Mencatat pengeluaran "${newExpense.description}" (${newExpense.category}) sebesar ${formatIDR(newExpense.amount)}`,
+      before_data: null,
+      after_data: newExpense,
+    });
+
     return { ok: true, expense: newExpense };
   };
 
@@ -563,10 +743,22 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = expenses.map((e) => (e.id === id ? updatedRecord : e));
     setExpenses(updated);
     persistLocalState({ expenses: updated });
+
+    await appendAuditLog({
+      action_type: "UPDATE",
+      entity_type: "EXPENSE",
+      entity_id: id,
+      summary: `Mengubah pengeluaran "${updatedRecord.description}" dari ${formatIDR(existing.amount)} menjadi ${formatIDR(updatedRecord.amount)}`,
+      before_data: existing,
+      after_data: updatedRecord,
+    });
+
     return { ok: true };
   };
 
   const deleteExpense = async (id: string): Promise<{ ok: boolean; error?: string }> => {
+    const existing = expenses.find((e) => e.id === id);
+
     if (storageMode === "SUPABASE" && supabaseClient) {
       const { error } = await supabaseClient.from("expenses").delete().eq("id", id);
       if (error) return { ok: false, error: error.message };
@@ -575,6 +767,18 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     const updated = expenses.filter((e) => e.id !== id);
     setExpenses(updated);
     persistLocalState({ expenses: updated });
+
+    if (existing) {
+      await appendAuditLog({
+        action_type: "DELETE",
+        entity_type: "EXPENSE",
+        entity_id: id,
+        summary: `Menghapus catatan pengeluaran "${existing.description}" senilai ${formatIDR(existing.amount)}`,
+        before_data: existing,
+        after_data: null,
+      });
+    }
+
     return { ok: true };
   };
 
@@ -679,6 +883,28 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
       stockMovements: updatedMovements,
     });
 
+    await appendAuditLog({
+      action_type: "STOCK_MOVE",
+      entity_type: "STOCK",
+      entity_id: item.id,
+      summary: `Perubahan stok [${params.movement_type}] pada "${item.name}": ${prevStock === null ? "NULL" : prevStock} -> ${resultingStock} ${item.stock_unit} (Alasan: ${movement.reason})`,
+      before_data: {
+        menu_item_id: item.id,
+        menu_name: item.name,
+        previous_stock: prevStock,
+        min_stock_threshold: item.min_stock_threshold,
+      },
+      after_data: {
+        menu_item_id: item.id,
+        menu_name: item.name,
+        resulting_stock: resultingStock,
+        quantity_change: quantityChange,
+        movement_type: params.movement_type,
+        reason: movement.reason,
+        min_stock_threshold: newThreshold,
+      },
+    });
+
     return { ok: true };
   };
 
@@ -730,6 +956,7 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
         transactions,
         expenses,
         stockMovements,
+        auditLogs,
         createCategory,
         updateCategory,
         deleteCategory,
