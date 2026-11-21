@@ -1,8 +1,15 @@
 // ============================================================================
-// WARCOFFE 13 — MENU CATALOG SEED SCRIPT (ONLY MENU CATALOG, 0 TRANSACTIONS)
+// WARCOFFE 13 — ADMINISTRATIVE MENU CATALOG SEED SCRIPT (57 ITEMS)
 // Capstone Project Asah 2026 | Team ID: A26-CS187
 // ============================================================================
-// Jalankan dengan: npm run seed
+// Jalankan di server/CLI dengan: npm run seed
+//
+// ATURAN KEAMANAN:
+// 1. Script administratif ini MEWAJIBKAN variabel server-only SUPABASE_SERVICE_ROLE_KEY.
+// 2. TIDAK menggunakan NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY atau
+//    NEXT_PUBLIC_SUPABASE_ANON_KEY sebagai fallback karena operasi administratif
+//    seed melewati RLS (Row Level Security).
+// 3. JANGAN PERNAH mengekspos SUPABASE_SERVICE_ROLE_KEY ke frontend atau prefix NEXT_PUBLIC_.
 // ============================================================================
 
 import { createClient } from "@supabase/supabase-js";
@@ -33,25 +40,35 @@ async function runSeed() {
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const supabaseKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
-  if (!supabaseUrl || !supabaseKey) {
-    console.log(
-      "\n[INFO] Kredensial Supabase belum diatur di environment variables."
+  if (!supabaseUrl) {
+    console.error(
+      "\n[ERROR] NEXT_PUBLIC_SUPABASE_URL belum dikonfigurasi di environment variables (.env.local)."
     );
-    console.log(
-      "[INFO] Aplikasi secara otomatis memuat 57 item menu Warcoffe 13 ke Local Fallback Store saat dijalankan."
-    );
-    console.log(
-      "[INFO] Jika ingin melakukan seed ke Supabase Cloud, isi NEXT_PUBLIC_SUPABASE_URL dan SUPABASE_SERVICE_ROLE_KEY di .env.local atau jalankan file supabase/seed.sql di SQL Editor Supabase."
-    );
-    return;
+    process.exit(1);
   }
 
-  console.log("\nMenghubungkan ke Supabase PostgreSQL...");
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  if (!serviceRoleKey) {
+    console.error(
+      "\n[ERROR] SUPABASE_SERVICE_ROLE_KEY tidak ditemukan di environment variables."
+    );
+    console.error(
+      "Script seed administratif ini mewajibkan SUPABASE_SERVICE_ROLE_KEY (server-only) untuk melewati Row Level Security (RLS) dan tidak menerima NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ataupun NEXT_PUBLIC_SUPABASE_ANON_KEY sebagai fallback."
+    );
+    console.error(
+      "Tambahkan SUPABASE_SERVICE_ROLE_KEY di .env.local (jangan pernah gunakan prefix NEXT_PUBLIC_) atau jalankan supabase/seed.sql langsung di SQL Editor Supabase."
+    );
+    process.exit(1);
+  }
+
+  console.log("\nMenghubungkan ke Supabase PostgreSQL menggunakan Service Role Key...");
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 
   const { error: catErr } = await supabase
     .from("menu_categories")

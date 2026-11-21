@@ -9,6 +9,9 @@
 --    mengisi sendiri melalui Stock Management.
 -- 3. Tidak ada pengurangan stok bahan baku berbasis resep otomatis.
 -- 4. Varian menu yang tidak jelas pada foto disimpan sebagai temperature_mode = 'UNSPECIFIED'.
+-- 5. Seluruh tabel menggunakan TEXT PRIMARY KEY (tanpa SERIAL/sequence).
+-- 6. Akses tabel menggunakan Least-Privilege GRANT & Owner-Only RLS
+--    berdasarkan klaim JWT app_metadata.role = 'owner'.
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -114,37 +117,113 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_menu ON stock_movements(menu_item
 CREATE INDEX IF NOT EXISTS idx_menu_items_category ON menu_items(category_id);
 
 -- ============================================================================
--- 7. ROW LEVEL SECURITY (RLS) — OWNER-ONLY AUTHENTICATION PROTECTION
--- Hanya pengguna terautentikasi (authenticated owner) yang dapat membaca
--- atau memodifikasi data bisnis Warcoffe 13.
+-- 7. FUNGSI VERIFIKASI OWNER & LEAST-PRIVILEGE GRANTS
+-- Memeriksa klaim JWT app_metadata.role = 'owner' yang hanya dapat diatur
+-- dari sisi server/admin Supabase Auth (tidak dapat dimodifikasi oleh client).
 -- ============================================================================
-ALTER TABLE menu_categories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE menu_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sales_transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sales_transaction_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
+CREATE OR REPLACE FUNCTION public.is_warcoffe_owner()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE(
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'owner',
+    false
+  );
+$$;
 
-DROP POLICY IF EXISTS "Owner authenticated full access menu_categories" ON menu_categories;
-CREATE POLICY "Owner authenticated full access menu_categories"
-  ON menu_categories FOR ALL TO authenticated USING (true) WITH CHECK (true);
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_warcoffe_owner() TO authenticated;
 
-DROP POLICY IF EXISTS "Owner authenticated full access menu_items" ON menu_items;
-CREATE POLICY "Owner authenticated full access menu_items"
-  ON menu_items FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- Pastikan anon dan PUBLIC tidak memiliki akses apa pun pada keenam tabel bisnis
+REVOKE ALL ON TABLE
+  public.menu_categories,
+  public.menu_items,
+  public.sales_transactions,
+  public.sales_transaction_items,
+  public.expenses,
+  public.stock_movements
+FROM anon, PUBLIC;
 
-DROP POLICY IF EXISTS "Owner authenticated full access sales_transactions" ON sales_transactions;
-CREATE POLICY "Owner authenticated full access sales_transactions"
-  ON sales_transactions FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- Berikan izin CRUD eksplisit paling minimal kepada role authenticated (bukan GRANT ALL)
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+  public.menu_categories,
+  public.menu_items,
+  public.sales_transactions,
+  public.sales_transaction_items,
+  public.expenses,
+  public.stock_movements
+TO authenticated;
 
-DROP POLICY IF EXISTS "Owner authenticated full access sales_transaction_items" ON sales_transaction_items;
-CREATE POLICY "Owner authenticated full access sales_transaction_items"
-  ON sales_transaction_items FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- ============================================================================
+-- 8. ROW LEVEL SECURITY (RLS) — STRICT OWNER-ONLY POLICIES
+-- Seluruh policy lama dihapus dan diganti dengan pemeriksaan public.is_warcoffe_owner().
+-- ============================================================================
+ALTER TABLE public.menu_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.menu_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_transaction_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Owner authenticated full access expenses" ON expenses;
-CREATE POLICY "Owner authenticated full access expenses"
-  ON expenses FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- Hapus policy lama (jika pernah dibuat sebelumnya) agar tidak ada permissive policy yang tersisa
+DROP POLICY IF EXISTS "Owner authenticated full access menu_categories" ON public.menu_categories;
+DROP POLICY IF EXISTS "Owner only access menu_categories" ON public.menu_categories;
 
-DROP POLICY IF EXISTS "Owner authenticated full access stock_movements" ON stock_movements;
-CREATE POLICY "Owner authenticated full access stock_movements"
-  ON stock_movements FOR ALL TO authenticated USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Owner authenticated full access menu_items" ON public.menu_items;
+DROP POLICY IF EXISTS "Owner only access menu_items" ON public.menu_items;
+
+DROP POLICY IF EXISTS "Owner authenticated full access sales_transactions" ON public.sales_transactions;
+DROP POLICY IF EXISTS "Owner only access sales_transactions" ON public.sales_transactions;
+
+DROP POLICY IF EXISTS "Owner authenticated full access sales_transaction_items" ON public.sales_transaction_items;
+DROP POLICY IF EXISTS "Owner only access sales_transaction_items" ON public.sales_transaction_items;
+
+DROP POLICY IF EXISTS "Owner authenticated full access expenses" ON public.expenses;
+DROP POLICY IF EXISTS "Owner only access expenses" ON public.expenses;
+
+DROP POLICY IF EXISTS "Owner authenticated full access stock_movements" ON public.stock_movements;
+DROP POLICY IF EXISTS "Owner only access stock_movements" ON public.stock_movements;
+
+-- Buat policy ketat Owner-Only menggunakan public.is_warcoffe_owner()
+CREATE POLICY "Owner only access menu_categories"
+  ON public.menu_categories
+  FOR ALL
+  TO authenticated
+  USING (public.is_warcoffe_owner())
+  WITH CHECK (public.is_warcoffe_owner());
+
+CREATE POLICY "Owner only access menu_items"
+  ON public.menu_items
+  FOR ALL
+  TO authenticated
+  USING (public.is_warcoffe_owner())
+  WITH CHECK (public.is_warcoffe_owner());
+
+CREATE POLICY "Owner only access sales_transactions"
+  ON public.sales_transactions
+  FOR ALL
+  TO authenticated
+  USING (public.is_warcoffe_owner())
+  WITH CHECK (public.is_warcoffe_owner());
+
+CREATE POLICY "Owner only access sales_transaction_items"
+  ON public.sales_transaction_items
+  FOR ALL
+  TO authenticated
+  USING (public.is_warcoffe_owner())
+  WITH CHECK (public.is_warcoffe_owner());
+
+CREATE POLICY "Owner only access expenses"
+  ON public.expenses
+  FOR ALL
+  TO authenticated
+  USING (public.is_warcoffe_owner())
+  WITH CHECK (public.is_warcoffe_owner());
+
+CREATE POLICY "Owner only access stock_movements"
+  ON public.stock_movements
+  FOR ALL
+  TO authenticated
+  USING (public.is_warcoffe_owner())
+  WITH CHECK (public.is_warcoffe_owner());

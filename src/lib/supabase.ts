@@ -21,17 +21,20 @@ import {
 import { INITIAL_MENU_CATEGORIES, INITIAL_MENU_ITEMS } from "@/lib/menu-seed-data";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "";
+const supabasePublicKey =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+  "";
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl &&
-    supabaseAnonKey &&
+    supabasePublicKey &&
     supabaseUrl.startsWith("http") &&
     !supabaseUrl.includes("your-project")
 );
 
 export const supabaseClient: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabasePublicKey)
   : null;
 
 const STORAGE_KEYS = {
