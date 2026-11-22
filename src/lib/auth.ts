@@ -67,6 +67,7 @@ export const PROTECTED_ROUTE_PREFIXES = [
   "/expenses",
   "/reports",
   "/ai-assistant",
+  "/audit-log",
 ] as const;
 
 export function isProtectedRoute(pathname: string): boolean {

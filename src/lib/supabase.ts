@@ -3,7 +3,8 @@
 // Capstone Project Asah 2026 | Team ID: A26-CS187
 // ============================================================================
 // Mendukung 2 mode penyimpanan:
-// 1. SUPABASE CLOUD MODE: Jika NEXT_PUBLIC_SUPABASE_URL & NEXT_PUBLIC_SUPABASE_ANON_KEY tersedia.
+// 1. SUPABASE CLOUD MODE: Jika NEXT_PUBLIC_SUPABASE_URL & NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+//    (atau NEXT_PUBLIC_SUPABASE_ANON_KEY) tersedia.
 // 2. LOCAL FALLBACK MODE: Jika kredensial belum dikonfigurasi, data disimpan
 //    secara persisten di browser localStorage dengan seed 57 katalog menu Warcoffe 13
 //    dan 0 transaksi/0 pengeluaran/stok NULL (tanpa data palsu).
@@ -11,6 +12,7 @@
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import {
+  AuditLogRecord,
   ExpenseRecord,
   MenuCategory,
   MenuItem,
@@ -43,6 +45,7 @@ const STORAGE_KEYS = {
   TRANSACTIONS: "warcoffe13_sales_transactions_v1",
   EXPENSES: "warcoffe13_expenses_v1",
   STOCK_MOVEMENTS: "warcoffe13_stock_movements_v1",
+  AUDIT_LOGS: "warcoffe13_audit_logs_v1",
 };
 
 function readLocal<T>(key: string, fallback: T): T {
@@ -71,6 +74,7 @@ export interface InitialAppData {
   transactions: SalesTransaction[];
   expenses: ExpenseRecord[];
   stockMovements: StockMovement[];
+  auditLogs: AuditLogRecord[];
   storageMode: "SUPABASE" | "LOCAL_FALLBACK";
   connectionWarning?: string;
 }
@@ -88,6 +92,7 @@ export async function loadAllWarcoffeData(): Promise<InitialAppData> {
   const localTransactions = readLocal<SalesTransaction[]>(STORAGE_KEYS.TRANSACTIONS, []);
   const localExpenses = readLocal<ExpenseRecord[]>(STORAGE_KEYS.EXPENSES, []);
   const localStockMovements = readLocal<StockMovement[]>(STORAGE_KEYS.STOCK_MOVEMENTS, []);
+  const localAuditLogs = readLocal<AuditLogRecord[]>(STORAGE_KEYS.AUDIT_LOGS, []);
 
   if (typeof window !== "undefined") {
     if (!window.localStorage.getItem(STORAGE_KEYS.CATEGORIES)) {
@@ -105,25 +110,41 @@ export async function loadAllWarcoffeData(): Promise<InitialAppData> {
       transactions: localTransactions,
       expenses: localExpenses,
       stockMovements: localStockMovements,
+      auditLogs: localAuditLogs,
       storageMode: "LOCAL_FALLBACK",
     };
   }
 
   try {
-    const [catRes, menuRes, txRes, txItemsRes, expRes, stockRes] = await Promise.all([
-      supabaseClient.from("menu_categories").select("*").order("sort_order", { ascending: true }),
-      supabaseClient.from("menu_items").select("*").order("id", { ascending: true }),
-      supabaseClient
-        .from("sales_transactions")
-        .select("*")
-        .order("transaction_date", { ascending: false }),
-      supabaseClient.from("sales_transaction_items").select("*"),
-      supabaseClient.from("expenses").select("*").order("expense_date", { ascending: false }),
-      supabaseClient
-        .from("stock_movements")
-        .select("*")
-        .order("movement_date", { ascending: false }),
-    ]);
+    const [catRes, menuRes, txRes, txItemsRes, expRes, stockRes, auditRes] =
+      await Promise.all([
+        supabaseClient
+          .from("menu_categories")
+          .select("*")
+          .order("sort_order", { ascending: true }),
+        supabaseClient
+          .from("menu_items")
+          .select("*")
+          .order("id", { ascending: true }),
+        supabaseClient
+          .from("sales_transactions")
+          .select("*")
+          .order("transaction_date", { ascending: false }),
+        supabaseClient.from("sales_transaction_items").select("*"),
+        supabaseClient
+          .from("expenses")
+          .select("*")
+          .order("expense_date", { ascending: false }),
+        supabaseClient
+          .from("stock_movements")
+          .select("*")
+          .order("movement_date", { ascending: false }),
+        supabaseClient
+          .from("audit_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(300),
+      ]);
 
     if (catRes.error || menuRes.error || txRes.error || expRes.error || stockRes.error) {
       const errMsg =
@@ -140,6 +161,7 @@ export async function loadAllWarcoffeData(): Promise<InitialAppData> {
         transactions: localTransactions,
         expenses: localExpenses,
         stockMovements: localStockMovements,
+        auditLogs: localAuditLogs,
         storageMode: "LOCAL_FALLBACK",
         connectionWarning: `Supabase belum di-migrasi atau tidak dapat diakses (${errMsg}). Menggunakan penyimpanan lokal.`,
       };
@@ -168,12 +190,17 @@ export async function loadAllWarcoffeData(): Promise<InitialAppData> {
       items: itemsByTx.get(row.id) || [],
     }));
 
+    const auditLogs: AuditLogRecord[] = !auditRes.error && auditRes.data
+      ? (auditRes.data as AuditLogRecord[])
+      : localAuditLogs;
+
     return {
       categories,
       menuItems,
       transactions,
       expenses: (expRes.data || []) as ExpenseRecord[],
       stockMovements: (stockRes.data || []) as StockMovement[],
+      auditLogs,
       storageMode: "SUPABASE",
     };
   } catch (err) {
@@ -184,6 +211,7 @@ export async function loadAllWarcoffeData(): Promise<InitialAppData> {
       transactions: localTransactions,
       expenses: localExpenses,
       stockMovements: localStockMovements,
+      auditLogs: localAuditLogs,
       storageMode: "LOCAL_FALLBACK",
       connectionWarning: `Koneksi Supabase gagal (${message}). Menggunakan penyimpanan lokal.`,
     };
@@ -196,10 +224,12 @@ export function persistLocalState(state: {
   transactions?: SalesTransaction[];
   expenses?: ExpenseRecord[];
   stockMovements?: StockMovement[];
+  auditLogs?: AuditLogRecord[];
 }) {
   if (state.categories) writeLocal(STORAGE_KEYS.CATEGORIES, state.categories);
   if (state.menuItems) writeLocal(STORAGE_KEYS.MENU_ITEMS, state.menuItems);
   if (state.transactions) writeLocal(STORAGE_KEYS.TRANSACTIONS, state.transactions);
   if (state.expenses) writeLocal(STORAGE_KEYS.EXPENSES, state.expenses);
   if (state.stockMovements) writeLocal(STORAGE_KEYS.STOCK_MOVEMENTS, state.stockMovements);
+  if (state.auditLogs) writeLocal(STORAGE_KEYS.AUDIT_LOGS, state.auditLogs);
 }

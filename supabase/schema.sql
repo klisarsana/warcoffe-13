@@ -109,12 +109,28 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 7. TABEL AUDIT LOGS (RIWAYAT AKTIVITAS & PERUBAHAN DATA WARCOFFE 13)
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  action_type TEXT NOT NULL CHECK (action_type IN ('CREATE', 'UPDATE', 'DELETE', 'STOCK_MOVE', 'AI_CONFIRM')),
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('SALE_TRANSACTION', 'EXPENSE', 'MENU_ITEM', 'CATEGORY', 'STOCK')),
+  entity_id TEXT NOT NULL,
+  actor_email TEXT NOT NULL DEFAULT 'owner',
+  summary TEXT NOT NULL,
+  before_data JSONB DEFAULT NULL,
+  after_data JSONB DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- INDEKS UNTUK PERFORMA QUERY LAPORAN & FILTER BULANAN
 CREATE INDEX IF NOT EXISTS idx_sales_transactions_date ON sales_transactions(transaction_date DESC);
 CREATE INDEX IF NOT EXISTS idx_sales_items_tx_id ON sales_transaction_items(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date DESC);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_menu ON stock_movements(menu_item_id, movement_date DESC);
 CREATE INDEX IF NOT EXISTS idx_menu_items_category ON menu_items(category_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_type ON audit_logs(entity_type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action_type ON audit_logs(action_type);
 
 -- ============================================================================
 -- 7. FUNGSI VERIFIKASI OWNER & LEAST-PRIVILEGE GRANTS
@@ -135,14 +151,15 @@ $$;
 GRANT USAGE ON SCHEMA public TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_warcoffe_owner() TO authenticated;
 
--- Pastikan anon dan PUBLIC tidak memiliki akses apa pun pada keenam tabel bisnis
+-- Pastikan anon dan PUBLIC tidak memiliki akses apa pun pada seluruh tabel bisnis
 REVOKE ALL ON TABLE
   public.menu_categories,
   public.menu_items,
   public.sales_transactions,
   public.sales_transaction_items,
   public.expenses,
-  public.stock_movements
+  public.stock_movements,
+  public.audit_logs
 FROM anon, PUBLIC;
 
 -- Berikan izin CRUD eksplisit paling minimal kepada role authenticated (bukan GRANT ALL)
@@ -155,6 +172,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.stock_movements
 TO authenticated;
 
+-- Tabel audit_logs bersifat append-only (hanya SELECT dan INSERT, tidak boleh UPDATE/DELETE)
+GRANT SELECT, INSERT ON TABLE public.audit_logs TO authenticated;
+
 -- ============================================================================
 -- 8. ROW LEVEL SECURITY (RLS) — STRICT OWNER-ONLY POLICIES
 -- Seluruh policy lama dihapus dan diganti dengan pemeriksaan public.is_warcoffe_owner().
@@ -165,6 +185,7 @@ ALTER TABLE public.sales_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sales_transaction_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 -- Hapus policy lama (jika pernah dibuat sebelumnya) agar tidak ada permissive policy yang tersisa
 DROP POLICY IF EXISTS "Owner authenticated full access menu_categories" ON public.menu_categories;
@@ -184,6 +205,8 @@ DROP POLICY IF EXISTS "Owner only access expenses" ON public.expenses;
 
 DROP POLICY IF EXISTS "Owner authenticated full access stock_movements" ON public.stock_movements;
 DROP POLICY IF EXISTS "Owner only access stock_movements" ON public.stock_movements;
+
+DROP POLICY IF EXISTS "Owner only access audit_logs" ON public.audit_logs;
 
 -- Buat policy ketat Owner-Only menggunakan public.is_warcoffe_owner()
 CREATE POLICY "Owner only access menu_categories"
@@ -223,6 +246,13 @@ CREATE POLICY "Owner only access expenses"
 
 CREATE POLICY "Owner only access stock_movements"
   ON public.stock_movements
+  FOR ALL
+  TO authenticated
+  USING (public.is_warcoffe_owner())
+  WITH CHECK (public.is_warcoffe_owner());
+
+CREATE POLICY "Owner only access audit_logs"
+  ON public.audit_logs
   FOR ALL
   TO authenticated
   USING (public.is_warcoffe_owner())

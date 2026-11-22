@@ -130,6 +130,32 @@ export interface StockMovement {
   movement_date: string; // ISO 8601 timestamp
 }
 
+export type AuditActionType =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "STOCK_MOVE"
+  | "AI_CONFIRM";
+
+export type AuditEntityType =
+  | "SALE_TRANSACTION"
+  | "EXPENSE"
+  | "MENU_ITEM"
+  | "CATEGORY"
+  | "STOCK";
+
+export interface AuditLogRecord {
+  id: string;
+  action_type: AuditActionType;
+  entity_type: AuditEntityType;
+  entity_id: string;
+  actor_email: string;
+  summary: string;
+  before_data: Record<string, unknown> | null;
+  after_data: Record<string, unknown> | null;
+  created_at: string; // ISO 8601 timestamp
+}
+
 // ============================================================================
 // DASHBOARD & REPORT SUMMARY MODELS
 // ============================================================================

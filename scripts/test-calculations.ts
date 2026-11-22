@@ -321,6 +321,7 @@ function runTests() {
   assert.equal(isProtectedRoute("/expenses"), true, "/expenses wajib diproteksi");
   assert.equal(isProtectedRoute("/reports"), true, "/reports wajib diproteksi");
   assert.equal(isProtectedRoute("/ai-assistant"), true, "/ai-assistant wajib diproteksi");
+  assert.equal(isProtectedRoute("/audit-log"), true, "/audit-log wajib diproteksi");
 
   assert.equal(validateOwnerLoginInput("", "secret").valid, false, "Email kosong harus ditolak");
   assert.equal(validateOwnerLoginInput("bukan-email", "secret").valid, false, "Format email salah harus ditolak");
