@@ -289,6 +289,23 @@ export default function AIAssistantPage() {
     setIsParsingDraft(false);
   };
 
+  const handleDraftTextareaKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
+      return;
+    }
+
+    // Di layar mobile/tablet, Enter tetap dipakai untuk membuat baris baru.
+    if (!window.matchMedia("(min-width: 1024px)").matches) {
+      return;
+    }
+
+    e.preventDefault();
+    if (isParsingDraft || isSavingDrafts) return;
+    e.currentTarget.form?.requestSubmit();
+  };
+
   const handleSaveAllDrafts = async () => {
     if (isSavingDrafts) return;
 
@@ -617,12 +634,25 @@ export default function AIAssistantPage() {
                 maxLength={4000}
                 value={rawDraftText}
                 onChange={(e) => setRawDraftText(e.target.value)}
+                onKeyDown={handleDraftTextareaKeyDown}
                 placeholder={`Contoh:\n10 november terjual 5 kopi\n7 november terjual 3 indomie`}
                 className="w-full p-3 rounded-xl border border-espresso-200 text-xs focus:outline-none focus:ring-2 focus:ring-caramel-500"
               />
-              <p className="mt-1 text-right text-[10px] text-espresso-500">
-                {rawDraftText.length}/4000 karakter
-              </p>
+              <div className="mt-1 flex items-center justify-between gap-3 text-[10px] text-espresso-500">
+                <span className="hidden lg:inline">
+                  <kbd className="rounded border border-espresso-300 bg-cream-50 px-1 py-0.5 font-sans">
+                    Enter
+                  </kbd>{" "}
+                  buat draft ·{" "}
+                  <kbd className="rounded border border-espresso-300 bg-cream-50 px-1 py-0.5 font-sans">
+                    Shift+Enter
+                  </kbd>{" "}
+                  baris baru
+                </span>
+                <span className="ml-auto shrink-0">
+                  {rawDraftText.length}/4000 karakter
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
