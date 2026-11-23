@@ -8,7 +8,7 @@ Model utama memakai **TF-IDF (word + char n-gram)** dengan classifier linear unt
 - `Minuman Racikan / Sachet`
 - `Makanan`
 
-Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategori pengeluaran ditangani oleh parser berbasis aturan. Service tidak memanggil LLM eksternal sehingga dapat berjalan lokal tanpa API key dan tetap di bawah timeout proxy Next.js (12 detik).
+Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategori pengeluaran ditangani oleh parser berbasis aturan. Service tidak memanggil LLM eksternal sehingga dapat berjalan lokal tanpa API key dan tetap di bawah timeout proxy Next.js (15 detik).
 
 ---
 
@@ -17,7 +17,7 @@ Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategor
 ```text
 ai-service/
 ├── app/
-│   ├── api/v1/                 # Endpoint FastAPI (/health, /parse-transaction)
+│   ├── api/v1/                 # Endpoint FastAPI (/health, /parse-transaction, /parse-transactions)
 │   ├── core/config.py          # Konfigurasi path & environment
 │   ├── ml/
 │   │   ├── catalog.py          # Load katalog menu
@@ -156,16 +156,19 @@ Alur integrasi:
 
 ```text
 Next.js /ai-assistant
-  -> POST /api/ai/parse-transaction (proxy Next.js)
-  -> POST http://localhost:8000/api/v1/parse-transaction
-  -> parser aturan + model kategori
-  -> draft JSON
-  -> konfirmasi pemilik
+  -> POST /api/ai/parse-transactions (proxy Next.js)
+  -> POST http://localhost:8000/api/v1/parse-transactions
+  -> pemecah teks per tanggal
+  -> parser aturan + model kategori per blok
+  -> daftar draft JSON
+  -> konfirmasi pemilik & simpan semua draft valid
 ```
+
+Endpoint singular tetap tersedia untuk kompatibilitas.
 
 ---
 
-## 5. Endpoint `POST /api/v1/parse-transaction`
+## 5. Endpoint `POST /api/v1/parse-transaction` (Singular)
 
 Request:
 
@@ -248,6 +251,96 @@ Status bisnis sengaja mengembalikan HTTP 200 agar proxy Next.js tidak mengubahny
 
 ---
 
+## 5b. Endpoint `POST /api/v1/parse-transactions` (Multi-Tanggal)
+
+Endpoint ini menerima beberapa baris transaksi dan mengembalikan `drafts` per tanggal/jenis. Panjang `text` maksimal 4.000 karakter.
+
+Request:
+
+```json
+{
+  "text": "10 november terjual 5 kopi\n7 november terjual 3 indomie",
+  "menu_catalog_hints": ["Kopi Hitam", "Indomie Rebus"]
+}
+```
+
+Response:
+
+```json
+{
+  "status": "SUCCESS",
+  "drafts": [
+    {
+      "status": "SUCCESS",
+      "draft_type": "INCOME_SALE",
+      "transaction_date": "2026-11-10",
+      "source_text": "10 november, terjual 5 kopi",
+      "items": [
+        {
+          "item_name": "Kopi Hitam",
+          "quantity": 5,
+          "unit_price": 4000,
+          "line_total": 20000
+        }
+      ],
+      "total_amount": 20000,
+      "assistant_message": "Draft penjualan berhasil dibuat.",
+      "requires_owner_confirmation": true
+    },
+    {
+      "status": "SUCCESS",
+      "draft_type": "INCOME_SALE",
+      "transaction_date": "2026-11-07",
+      "source_text": "7 november, terjual 3 indomie",
+      "items": [
+        {
+          "item_name": "Indomie Rebus",
+          "quantity": 3,
+          "unit_price": 7000,
+          "line_total": 21000
+        }
+      ],
+      "total_amount": 21000,
+      "assistant_message": "Draft penjualan berhasil dibuat.",
+      "requires_owner_confirmation": true
+    }
+  ],
+  "assistant_message": "2 draft transaksi berhasil dibuat.",
+  "requires_owner_confirmation": true
+}
+```
+
+Aturan:
+
+- Baris baru dan `;` memisahkan baris input.
+- Setiap tanggal memulai blok baru; teks sebelum tanggal pertama memakai tanggal hari ini.
+- Baris tanpa tanggal setelah blok bertanggal mengikuti tanggal terakhir.
+- Tanggal dan jenis transaksi yang sama digabung; item yang sama dijumlahkan.
+- Penjualan dan pengeluaran pada tanggal yang sama menjadi draft terpisah.
+- Status agregat: `SUCCESS`, `PARTIAL`, `INCOMPLETE`, `OUT_OF_CONTEXT`, atau `SERVICE_UNAVAILABLE`.
+- Maksimal 20 draft dikembalikan per request.
+
+`source_text` menyimpan potongan input asal draft. UI memakainya untuk mengisi ulang text box hanya dengan draft yang belum berhasil disimpan.
+
+### Format tanggal yang didukung
+
+Tanggal transaksi diambil dari teks yang dikirim, bukan selalu tanggal hari ini. Contoh yang sudah didukung:
+
+| Ditulis di text box | `transaction_date` |
+|---|---|
+| `hari ini` | tanggal hari ini |
+| `kemarin`, `besok`, `kemarin lusa`, `besok lusa` | tanggal relatif |
+| `3 hari lalu`, `2 hari lagi` | tanggal relatif |
+| `minggu lalu`, `minggu depan`, `bulan lalu`, `tahun depan` | tanggal relatif |
+| `tanggal 25` / `tgl 25` | tanggal 25 pada bulan berjalan |
+| `20 November 2026`, `20 Nov 2026`, `20 Desember` | tanggal eksplisit |
+| `20/11/2026`, `20-11-26`, `2026-11-20` | tanggal eksplisit |
+| `tgl 20/11/2026` | tanggal eksplisit dengan prefix |
+
+Frasa tanggal dibuang dari teks sebelum pencocokan item, sehingga `"laku Kopi Liong panas 2 tanggal 20 November 2026"` tetap menghasilkan item **Kopi Liong** dan tanggal **2026-11-20**. Tanggal yang tidak valid (misalnya `31/02/2026`) diabaikan dan jatuh ke tanggal hari ini.
+
+---
+
 ## 6. Notebook
 
 Buka dan jalankan:
@@ -286,6 +379,7 @@ Cakupan tes:
 - pencocokan nama menu termasuk typo (`indomi telor`),
 - intent penjualan/pengeluaran/out-of-context,
 - endpoint API untuk status `SUCCESS`, `INCOMPLETE`, `OUT_OF_CONTEXT`,
+- endpoint multi-tanggal: dua tanggal, tanggal sama digabung, penjualan dan pengeluaran pada tanggal yang sama, baris tanpa tanggal, serta status `PARTIAL`,
 - prediksi model pada contoh jelas.
 
 ---

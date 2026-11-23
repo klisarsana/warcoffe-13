@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.parsers.date import strip_date_phrases
 from app.parsers.money import find_money_matches, strip_money_matches
 from app.parsers.quantity import find_quantity, strip_quantity
 from app.schemas.transaction import DraftItem
@@ -35,6 +36,7 @@ def _split_segments(text: str) -> list[str]:
 def extract_sale_items(text: str, menu_hints: list[str]) -> ExtractionResult:
     items: list[DraftItem] = []
     unmatched_without_price = False
+    text = strip_date_phrases(text)
 
     for raw_segment in _split_segments(text):
         segment = strip_filler(raw_segment)

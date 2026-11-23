@@ -217,10 +217,26 @@ export interface AITransactionDraftResponse {
   classifier_model_used?: string;
   confidence_score?: number;
   transaction_date: string;
+  /** Potongan teks asli yang menjadi sumber draft ini. */
+  source_text?: string;
   items: AITransactionDraftItem[];
   total_amount: number | null;
   expense_description?: string;
   missing_fields: string[];
+  assistant_message: string;
+  requires_owner_confirmation: true;
+}
+
+export type AIMultiTransactionDraftStatus =
+  | "SUCCESS"
+  | "PARTIAL"
+  | "INCOMPLETE"
+  | "OUT_OF_CONTEXT"
+  | "SERVICE_UNAVAILABLE";
+
+export interface AIMultiTransactionDraftResponse {
+  status: AIMultiTransactionDraftStatus;
+  drafts: AITransactionDraftResponse[];
   assistant_message: string;
   requires_owner_confirmation: true;
 }

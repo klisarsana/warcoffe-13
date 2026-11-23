@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.parsers.date import parse_transaction_date
+from app.parsers.date import parse_transaction_date, strip_date_phrases
 from app.schemas.transaction import (
     DraftItem,
     ParseTransactionRequest,
@@ -26,6 +26,7 @@ def _base_response(
     total_amount: int | None = None,
     expense_description: str | None = None,
     missing_fields: list[str] | None = None,
+    source_text: str | None = None,
 ) -> ParseTransactionResponse:
     return ParseTransactionResponse(
         status=status,
@@ -34,6 +35,7 @@ def _base_response(
         classifier_model_used=classifier_model_used,
         confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
         transaction_date=transaction_date,
+        source_text=source_text,
         items=items or [],
         total_amount=total_amount,
         expense_description=expense_description,
@@ -43,12 +45,22 @@ def _base_response(
     )
 
 
-def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionResponse:
+def parse_transaction(
+    request: ParseTransactionRequest,
+    *,
+    forced_date: str | None = None,
+    source_text: str | None = None,
+) -> ParseTransactionResponse:
     text = normalize_text(request.text)
-    transaction_date = parse_transaction_date(text)
+    transaction_date = forced_date or parse_transaction_date(text)
+    content_text = strip_date_phrases(text) or text
+    draft_source = source_text if source_text is not None else request.text.strip()
+
+    def _response(**kwargs) -> ParseTransactionResponse:
+        return _base_response(source_text=draft_source, **kwargs)
 
     if not text:
-        return _base_response(
+        return _response(
             status="INCOMPLETE",
             draft_type="UNKNOWN",
             transaction_date=transaction_date,
@@ -60,7 +72,7 @@ def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionRespo
 
     if intent.draft_type == "UNKNOWN":
         if intent.sale_signals or intent.expense_signals:
-            return _base_response(
+            return _response(
                 status="INCOMPLETE",
                 draft_type="UNKNOWN",
                 transaction_date=transaction_date,
@@ -73,7 +85,7 @@ def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionRespo
                 missing_fields=["draft_type"],
             )
 
-        return _base_response(
+        return _response(
             status="OUT_OF_CONTEXT",
             draft_type="UNKNOWN",
             transaction_date=transaction_date,
@@ -85,11 +97,11 @@ def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionRespo
         )
 
     if intent.draft_type == "INCOME_SALE":
-        extraction = extract_sale_items(text, request.menu_catalog_hints)
-        category = predict_sale_category(text)
+        extraction = extract_sale_items(content_text, request.menu_catalog_hints)
+        category = predict_sale_category(content_text)
 
         if not extraction.items:
-            return _base_response(
+            return _response(
                 status="INCOMPLETE",
                 draft_type="INCOME_SALE",
                 transaction_date=transaction_date,
@@ -104,7 +116,7 @@ def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionRespo
             )
 
         if extraction.unmatched_without_price:
-            return _base_response(
+            return _response(
                 status="INCOMPLETE",
                 draft_type="INCOME_SALE",
                 transaction_date=transaction_date,
@@ -127,7 +139,7 @@ def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionRespo
             else None
         )
 
-        return _base_response(
+        return _response(
             status="SUCCESS",
             draft_type="INCOME_SALE",
             transaction_date=transaction_date,
@@ -142,10 +154,10 @@ def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionRespo
             total_amount=total_amount,
         )
 
-    expense = extract_expense(text)
+    expense = extract_expense(content_text)
 
     if expense.amount is None or expense.amount <= 0:
-        return _base_response(
+        return _response(
             status="INCOMPLETE",
             draft_type="EXPENSE",
             transaction_date=transaction_date,
@@ -160,7 +172,7 @@ def parse_transaction(request: ParseTransactionRequest) -> ParseTransactionRespo
             missing_fields=["total_amount"],
         )
 
-    return _base_response(
+    return _response(
         status="SUCCESS",
         draft_type="EXPENSE",
         transaction_date=transaction_date,
