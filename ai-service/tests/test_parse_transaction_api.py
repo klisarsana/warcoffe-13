@@ -38,6 +38,44 @@ def test_sale_success(menu_hints: list[str]) -> None:
     assert "Indomie Telur" in names
 
 
+def test_sale_payment_method_qris(menu_hints: list[str]) -> None:
+    response = client.post(
+        "/api/v1/parse-transaction",
+        json=_payload("terjual 5 kopi liong qris", menu_hints),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "SUCCESS"
+    assert body["payment_method"] == "QRIS"
+    assert body["items"][0]["item_name"] == "Kopi Liong"
+    assert body["items"][0]["quantity"] == 5
+    assert body["total_amount"] == 25000
+
+
+def test_sale_payment_method_transfer(menu_hints: list[str]) -> None:
+    response = client.post(
+        "/api/v1/parse-transaction",
+        json=_payload("laku 2 kopi liong transfer bank", menu_hints),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "SUCCESS"
+    assert body["payment_method"] == "TRANSFER"
+    assert body["items"][0]["item_name"] == "Kopi Liong"
+    assert body["items"][0]["quantity"] == 2
+
+
+def test_sale_payment_method_defaults_to_cash(menu_hints: list[str]) -> None:
+    response = client.post(
+        "/api/v1/parse-transaction",
+        json=_payload("terjual 5 kopi liong", menu_hints),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "SUCCESS"
+    assert body["payment_method"] == "TUNAI"
+
+
 def test_expense_success(menu_hints: list[str]) -> None:
     response = client.post(
         "/api/v1/parse-transaction",
@@ -49,6 +87,7 @@ def test_expense_success(menu_hints: list[str]) -> None:
     assert body["draft_type"] == "EXPENSE"
     assert body["total_amount"] == 35000
     assert body["predicted_category"] == "Gas, Listrik & Air"
+    assert body["payment_method"] is None
     assert body["requires_owner_confirmation"] is True
 
 
@@ -203,6 +242,29 @@ def test_multi_date_same_date_sale_and_expense_are_separate(
     assert by_type["INCOME_SALE"]["total_amount"] == 20000
     assert by_type["EXPENSE"]["transaction_date"] == "2026-11-10"
     assert by_type["EXPENSE"]["total_amount"] == 35000
+
+
+def test_multi_date_same_date_different_payment_methods_are_separate(
+    menu_hints: list[str],
+) -> None:
+    response = client.post(
+        "/api/v1/parse-transactions",
+        json=_payload(
+            "10 november terjual 5 kopi qris\n"
+            "10 november terjual 3 kopi tunai",
+            menu_hints,
+        ),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "SUCCESS"
+    assert len(body["drafts"]) == 2
+
+    by_method = {draft["payment_method"]: draft for draft in body["drafts"]}
+    assert by_method["QRIS"]["transaction_date"] == "2026-11-10"
+    assert by_method["QRIS"]["items"][0]["quantity"] == 5
+    assert by_method["TUNAI"]["transaction_date"] == "2026-11-10"
+    assert by_method["TUNAI"]["items"][0]["quantity"] == 3
 
 
 def test_multi_date_line_without_date_follows_last_date(

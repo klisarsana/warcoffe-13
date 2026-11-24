@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.parsers.payment import PaymentMethod
+
 
 DraftStatus = Literal["SUCCESS", "INCOMPLETE", "OUT_OF_CONTEXT", "SERVICE_UNAVAILABLE"]
 MultiDraftStatus = Literal[
@@ -41,6 +43,7 @@ class ParseTransactionResponse(BaseModel):
     classifier_model_used: str | None = None
     confidence_score: float | None = None
     transaction_date: str
+    payment_method: PaymentMethod | None = None
     source_text: str | None = None
     items: list[DraftItem] = Field(default_factory=list)
     total_amount: int | None = None

@@ -180,11 +180,11 @@ Aplikasi web ini menyediakan *service adapter* di [`src/lib/ai-adapter.ts`](./sr
 ### A. Endpoint 1: Ekstraksi Teks ke Draft Transaksi
 - **URL FastAPI Target (multi-tanggal):** `POST {AI_SERVICE_URL}/api/v1/parse-transactions`
 - **URL FastAPI Target (satu draft):** `POST {AI_SERVICE_URL}/api/v1/parse-transaction`
-- **Response multi-tanggal:** `AIMultiTransactionDraftResponse` berisi array `drafts`; detail aturan ada di bagian [8E](#e-input-beberapa-tanggal-sekaligus).
+- **Response multi-tanggal:** `AIMultiTransactionDraftResponse` berisi array `drafts`; detail aturan ada di bagian [8F](#f-input-beberapa-tanggal-sekaligus).
 - **Request JSON:**
   ```json
   {
-    "text": "laku Kopi Hitam panas 2, Indomie Telur 1",
+    "text": "laku Kopi Hitam panas 2, Indomie Telur 1 qris",
     "menu_catalog_hints": ["Kopi Hitam", "Indomie Telur"]
   }
   ```
@@ -197,6 +197,7 @@ Aplikasi web ini menyediakan *service adapter* di [`src/lib/ai-adapter.ts`](./sr
     "classifier_model_used": "TF-IDF (word + char n-gram) + Logistic Regression",
     "confidence_score": 0.5475,
     "transaction_date": "2026-11-22",
+    "payment_method": "QRIS",
     "items": [
       {
         "raw_item_text": "laku kopi hitam panas 2",
@@ -227,6 +228,8 @@ Aplikasi web ini menyediakan *service adapter* di [`src/lib/ai-adapter.ts`](./sr
   ```
 
 > Untuk transaksi campuran (minuman + makanan), `predicted_category` adalah prediksi untuk keseluruhan kalimat. Kategori tiap item tetap mengikuti katalog menu saat draft disimpan.
+
+> `payment_method` hanya diisi untuk draft penjualan (`INCOME_SALE`): `TUNAI`, `QRIS`, atau `TRANSFER`. Jika metode tidak ditulis, nilainya `TUNAI`. Nilai ini yang dipakai saat draft disimpan, bukan lagi hardcode tunai.
 
 ### B. Endpoint 2: AI Business Assistant Chat
 - **URL FastAPI Target:** `POST {AI_SERVICE_URL}/api/v1/chat`
@@ -318,7 +321,25 @@ Contoh: `"laku Kopi Liong panas 2 tanggal 20 November 2026"` menghasilkan `trans
 
 Saat pemilik menekan **Simpan Semua Draft Valid**, tanggal draft dipakai untuk transaksi penjualan (`transactionDate`) maupun pengeluaran (`expense_date`), sehingga tanggal yang tersimpan tidak lagi selalu tanggal hari ini.
 
-### E. Input Beberapa Tanggal Sekaligus
+### E. Metode Pembayaran Mengikuti Teks
+
+Draft penjualan kini membaca metode pembayaran dari kalimat:
+
+- `tunai`, `cash`, `kontan` → `TUNAI`
+- `qris`, `qr`, `scan qr`, `qr code` → `QRIS`
+- `transfer`, `transfer bank`, `tf` → `TRANSFER`
+
+Contoh:
+
+| Kalimat | `payment_method` |
+|---|---|
+| `terjual 5 kopi liong qris` | `QRIS` |
+| `laku 2 kopi liong transfer bank` | `TRANSFER` |
+| `terjual 5 kopi liong` | `TUNAI` (default) |
+
+Frasa metode pembayaran dibuang sebelum pencocokan item, sehingga nama item dan kuantitas tetap terbaca. Nilai `payment_method` ditampilkan pada pratinjau draft dan dipakai saat transaksi penjualan disimpan—tidak lagi selalu `TUNAI`.
+
+### F. Input Beberapa Tanggal Sekaligus
 
 Satu text box dapat memuat beberapa tanggal:
 
@@ -340,13 +361,14 @@ Aturan pemecahan:
 2. Setiap kemunculan tanggal memulai draft baru.
 3. Baris tanpa tanggal setelah baris bertanggal mengikuti tanggal terakhir.
 4. Teks sebelum tanggal pertama memakai tanggal hari ini.
-5. Tanggal dan jenis transaksi yang sama digabung menjadi satu draft; item yang sama dijumlahkan.
+5. Tanggal, jenis transaksi, dan metode pembayaran yang sama digabung menjadi satu draft; item yang sama dijumlahkan.
 6. Penjualan dan pengeluaran pada tanggal yang sama tetap menjadi dua draft karena disimpan ke tabel berbeda.
-7. Maksimal 20 draft ditampilkan per request; pecah input bila jumlahnya lebih banyak.
+7. Penjualan pada tanggal yang sama dengan metode pembayaran berbeda juga tetap menjadi dua draft.
+8. Maksimal 20 draft ditampilkan per request; pecah input bila jumlahnya lebih banyak.
 
 Tombol **Simpan Semua Draft Valid** menyimpan semua draft berstatus `SUCCESS` secara berurutan. Draft `INCOMPLETE`/`OUT_OF_CONTEXT` tidak disimpan dan tetap tampil. Jika hanya sebagian draft yang gagal, teks input diisi ulang hanya dengan potongan teks draft yang belum tersimpan agar tidak terjadi duplikasi saat parse ulang.
 
-### F. Menjalankan dan Menguji
+### G. Menjalankan dan Menguji
 
 ```bash
 # terminal 1 — service AI
@@ -362,7 +384,7 @@ npm run dev
 
 ```bash
 cd ai-service
-pytest -q                 # 40 test
+pytest -q                 # 47 test
 python scripts/train_model.py
 ```
 

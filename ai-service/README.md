@@ -189,6 +189,7 @@ Response sukses penjualan:
   "classifier_model_used": "TF-IDF (word + char n-gram) + Logistic Regression",
   "confidence_score": 0.5096,
   "transaction_date": "2026-11-21",
+  "payment_method": "TUNAI",
   "items": [
     {
       "raw_item_text": "laku kopi liong panas 2",
@@ -229,6 +230,7 @@ Response pengeluaran:
   "classifier_model_used": "expense-keyword-rules-v1",
   "confidence_score": 0.8,
   "transaction_date": "2026-11-21",
+  "payment_method": null,
   "items": [],
   "total_amount": 35000,
   "expense_description": "beli gas elpiji dan es batu",
@@ -274,6 +276,7 @@ Response:
       "status": "SUCCESS",
       "draft_type": "INCOME_SALE",
       "transaction_date": "2026-11-10",
+      "payment_method": "TUNAI",
       "source_text": "10 november, terjual 5 kopi",
       "items": [
         {
@@ -291,6 +294,7 @@ Response:
       "status": "SUCCESS",
       "draft_type": "INCOME_SALE",
       "transaction_date": "2026-11-07",
+      "payment_method": "TUNAI",
       "source_text": "7 november, terjual 3 indomie",
       "items": [
         {
@@ -315,8 +319,10 @@ Aturan:
 - Baris baru dan `;` memisahkan baris input.
 - Setiap tanggal memulai blok baru; teks sebelum tanggal pertama memakai tanggal hari ini.
 - Baris tanpa tanggal setelah blok bertanggal mengikuti tanggal terakhir.
-- Tanggal dan jenis transaksi yang sama digabung; item yang sama dijumlahkan.
+- Tanggal, jenis transaksi, dan metode pembayaran yang sama digabung; item yang sama dijumlahkan.
 - Penjualan dan pengeluaran pada tanggal yang sama menjadi draft terpisah.
+- Penjualan pada tanggal yang sama dengan metode pembayaran berbeda juga menjadi draft terpisah.
+- Metode pembayaran penjualan dibaca dari teks; default `TUNAI` bila tidak ditulis.
 - Status agregat: `SUCCESS`, `PARTIAL`, `INCOMPLETE`, `OUT_OF_CONTEXT`, atau `SERVICE_UNAVAILABLE`.
 - Maksimal 20 draft dikembalikan per request.
 
@@ -338,6 +344,19 @@ Tanggal transaksi diambil dari teks yang dikirim, bukan selalu tanggal hari ini.
 | `tgl 20/11/2026` | tanggal eksplisit dengan prefix |
 
 Frasa tanggal dibuang dari teks sebelum pencocokan item, sehingga `"laku Kopi Liong panas 2 tanggal 20 November 2026"` tetap menghasilkan item **Kopi Liong** dan tanggal **2026-11-20**. Tanggal yang tidak valid (misalnya `31/02/2026`) diabaikan dan jatuh ke tanggal hari ini.
+
+### Format metode pembayaran yang didukung
+
+`payment_method` hanya diisi untuk draft penjualan (`INCOME_SALE`). Draft pengeluaran mengembalikan `null` karena metode pembayaran tidak disimpan pada tabel pengeluaran.
+
+| Ditulis di text box | `payment_method` |
+|---|---|
+| `tunai`, `cash`, `kontan` | `TUNAI` |
+| `qris`, `qr`, `scan qr`, `qr code` | `QRIS` |
+| `transfer`, `transfer bank`, `tf` | `TRANSFER` |
+| tidak ditulis | `TUNAI` (default) |
+
+Frasa metode pembayaran dan kata penghubung seperti `via`/`pakai` dibuang sebelum pencocokan item. Contoh: `"terjual 5 kopi liong qris"` menghasilkan item **Kopi Liong** dengan kuantitas 5 dan `payment_method: "QRIS"`.
 
 ---
 
@@ -380,6 +399,7 @@ Cakupan tes:
 - intent penjualan/pengeluaran/out-of-context,
 - endpoint API untuk status `SUCCESS`, `INCOMPLETE`, `OUT_OF_CONTEXT`,
 - endpoint multi-tanggal: dua tanggal, tanggal sama digabung, penjualan dan pengeluaran pada tanggal yang sama, baris tanpa tanggal, serta status `PARTIAL`,
+- metode pembayaran `TUNAI`/`QRIS`/`TRANSFER`, default tunai, dan pemisahan draft penjualan dengan metode berbeda pada tanggal yang sama,
 - prediksi model pada contoh jelas.
 
 ---

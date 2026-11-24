@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from app.parsers.date import parse_transaction_date, strip_date_phrases
+from app.parsers.payment import (
+    PaymentMethod,
+    detect_payment_method,
+    strip_payment_method_phrases,
+)
 from app.schemas.transaction import (
     DraftItem,
     ParseTransactionRequest,
@@ -26,6 +31,7 @@ def _base_response(
     total_amount: int | None = None,
     expense_description: str | None = None,
     missing_fields: list[str] | None = None,
+    payment_method: PaymentMethod | None = None,
     source_text: str | None = None,
 ) -> ParseTransactionResponse:
     return ParseTransactionResponse(
@@ -35,6 +41,7 @@ def _base_response(
         classifier_model_used=classifier_model_used,
         confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
         transaction_date=transaction_date,
+        payment_method=payment_method,
         source_text=source_text,
         items=items or [],
         total_amount=total_amount,
@@ -53,11 +60,20 @@ def parse_transaction(
 ) -> ParseTransactionResponse:
     text = normalize_text(request.text)
     transaction_date = forced_date or parse_transaction_date(text)
-    content_text = strip_date_phrases(text) or text
+    payment_method = detect_payment_method(text)
+    content_text = strip_payment_method_phrases(strip_date_phrases(text)) or text
     draft_source = source_text if source_text is not None else request.text.strip()
 
     def _response(**kwargs) -> ParseTransactionResponse:
-        return _base_response(source_text=draft_source, **kwargs)
+        return _base_response(
+            payment_method=(
+                payment_method
+                if kwargs.get("draft_type") == "INCOME_SALE"
+                else None
+            ),
+            source_text=draft_source,
+            **kwargs,
+        )
 
     if not text:
         return _response(

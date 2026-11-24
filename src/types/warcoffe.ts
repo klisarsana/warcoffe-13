@@ -217,6 +217,8 @@ export interface AITransactionDraftResponse {
   classifier_model_used?: string;
   confidence_score?: number;
   transaction_date: string;
+  /** Metode pembayaran yang terdeteksi; default TUNAI untuk draft penjualan. */
+  payment_method?: PaymentMethod;
   /** Potongan teks asli yang menjadi sumber draft ini. */
   source_text?: string;
   items: AITransactionDraftItem[];

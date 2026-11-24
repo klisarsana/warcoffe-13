@@ -8,6 +8,10 @@ from app.parsers.date import (
     strip_date_phrases,
 )
 from app.parsers.money import first_money, strip_money_matches, total_money
+from app.parsers.payment import (
+    detect_payment_method,
+    strip_payment_method_phrases,
+)
 from app.parsers.quantity import find_quantity, strip_quantity
 
 
@@ -122,3 +126,28 @@ def test_find_all_dates_skips_invalid_date() -> None:
     now = datetime(2026, 11, 21, 10, 0, 0)
     matches = find_date_matches("31/02/2026 lalu 20/11/2026", now)
     assert [match.value.isoformat() for match in matches] == ["2026-11-20"]
+
+
+def test_payment_method_detection() -> None:
+    assert detect_payment_method("terjual 5 kopi liong qris") == "QRIS"
+    assert detect_payment_method("laku 2 kopi liong transfer bank") == "TRANSFER"
+    assert detect_payment_method("terjual 3 teh tunai") == "TUNAI"
+    assert detect_payment_method("terjual 3 teh") == "TUNAI"
+    assert detect_payment_method("terjual 3 teh cash") == "TUNAI"
+
+
+def test_payment_method_first_mentioned_wins() -> None:
+    assert detect_payment_method("qris lalu transfer") == "QRIS"
+    assert detect_payment_method("transfer lalu qris") == "TRANSFER"
+
+
+def test_strip_payment_method_phrases() -> None:
+    assert (
+        strip_payment_method_phrases("terjual 5 kopi qris")
+        == "terjual 5 kopi"
+    )
+    assert (
+        strip_payment_method_phrases("laku 2 kopi via transfer bank")
+        == "laku 2 kopi"
+    )
+    assert strip_payment_method_phrases("bayar pakai qris") == ""

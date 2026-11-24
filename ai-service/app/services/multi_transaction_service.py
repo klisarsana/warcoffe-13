@@ -219,12 +219,18 @@ def _merge_successful_group(
 def _merge_drafts(
     drafts: list[ParseTransactionResponse],
 ) -> list[ParseTransactionResponse]:
-    """Gabung draft sukses dengan tanggal dan jenis transaksi yang sama."""
-    groups: dict[tuple[str, str], list[ParseTransactionResponse]] = {}
+    """Gabung draft sukses dengan tanggal, jenis, dan metode bayar yang sama."""
+    groups: dict[
+        tuple[str, str, str | None], list[ParseTransactionResponse]
+    ] = {}
     for draft in drafts:
         if draft.status != "SUCCESS":
             continue
-        key = (draft.transaction_date, draft.draft_type)
+        key = (
+            draft.transaction_date,
+            draft.draft_type,
+            draft.payment_method,
+        )
         groups.setdefault(key, []).append(draft)
 
     merged_by_key = {
@@ -233,13 +239,17 @@ def _merge_drafts(
     }
 
     result: list[ParseTransactionResponse] = []
-    emitted: set[tuple[str, str]] = set()
+    emitted: set[tuple[str, str, str | None]] = set()
     for draft in drafts:
         if draft.status != "SUCCESS":
             result.append(draft)
             continue
 
-        key = (draft.transaction_date, draft.draft_type)
+        key = (
+            draft.transaction_date,
+            draft.draft_type,
+            draft.payment_method,
+        )
         if key in emitted:
             continue
         emitted.add(key)

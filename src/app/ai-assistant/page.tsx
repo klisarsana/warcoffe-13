@@ -231,7 +231,7 @@ export default function AIAssistantPage() {
       const total = cartItems.reduce((sum, item) => sum + item.line_total, 0);
       const res = await createSaleTransaction({
         cart: cartItems,
-        paymentMethod: "TUNAI",
+        paymentMethod: draft.payment_method || "TUNAI",
         amountPaid: total,
         transactionDate: draft.transaction_date,
         customerNote: "Dikonfirmasi pemilik dari draft teks AI",
@@ -879,6 +879,16 @@ export default function AIAssistantPage() {
                               {draft.predicted_category}
                             </p>
                           </div>
+                          {draft.draft_type === "INCOME_SALE" && (
+                            <div className="rounded-lg border border-espresso-200 bg-white/70 px-3 py-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-espresso-500">
+                                Metode Pembayaran
+                              </p>
+                              <p className="mt-0.5 font-semibold">
+                                {draft.payment_method || "TUNAI"}
+                              </p>
+                            </div>
+                          )}
                           <div className="rounded-lg border border-espresso-200 bg-white/70 px-3 py-2">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-espresso-500">
                               Confidence
@@ -979,7 +989,7 @@ export default function AIAssistantPage() {
               <pre className="p-3.5 rounded-xl bg-espresso-950 text-cream-100 overflow-x-auto text-[11px] leading-relaxed">
 {`// Request Body dari Next.js Web App:
 {
-  "text": "10 november terjual 5 kopi\\n7 november terjual 3 indomie",
+  "text": "10 november terjual 5 kopi qris\\n7 november terjual 3 indomie",
   "menu_catalog_hints": ["Kopi Hitam", "Indomie Telur", "..."]
 }
 
@@ -991,7 +1001,8 @@ export default function AIAssistantPage() {
       "status": "SUCCESS",
       "draft_type": "INCOME_SALE",
       "transaction_date": "2026-11-10",
-      "source_text": "10 november, terjual 5 kopi",
+      "payment_method": "QRIS", // TUNAI | QRIS | TRANSFER, default TUNAI
+      "source_text": "10 november, terjual 5 kopi qris",
       "items": [
         {
           "item_name": "Kopi Hitam",

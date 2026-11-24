@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from app.parsers.date import strip_date_phrases
 from app.parsers.money import strip_money_matches, total_money
+from app.parsers.payment import strip_payment_method_phrases
 from app.services.category_classifier import predict_expense_category
 from app.utils.text import normalize_text, strip_filler
 
@@ -21,6 +22,7 @@ class ExpenseExtraction:
 def extract_expense(text: str) -> ExpenseExtraction:
     description = strip_filler(normalize_text(text))
     description = strip_date_phrases(description)
+    description = strip_payment_method_phrases(description)
     description = strip_money_matches(description)
     description = re.sub(r"\s+", " ", description).strip(" ,.;:-")
     if not description:
