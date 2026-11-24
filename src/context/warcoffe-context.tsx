@@ -474,7 +474,7 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
     }
 
     const nowIso = params.transactionDate || new Date().toISOString();
-    const txId = `tx-${Date.now()}`;
+    const txId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const datePart = nowIso.slice(0, 10).replace(/-/g, "");
     const randomPart = String(Math.floor(1000 + Math.random() * 9000));
     const txNumber = `WC13-${datePart}-${randomPart}`;
@@ -524,9 +524,11 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
       if (itemError) return { ok: false, errors: [itemError.message] };
     }
 
-    const updated = [newTransaction, ...transactions];
-    setTransactions(updated);
-    persistLocalState({ transactions: updated });
+    setTransactions((previous) => {
+      const updated = [newTransaction, ...previous];
+      persistLocalState({ transactions: updated });
+      return updated;
+    });
 
     await appendAuditLog({
       action_type:
@@ -670,7 +672,7 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
 
     const nowIso = new Date().toISOString();
     const newExpense: ExpenseRecord = {
-      id: `exp-${Date.now()}`,
+      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       expense_date: params.expense_date,
       description: params.description.trim(),
       category: params.category.trim(),
@@ -687,9 +689,11 @@ export function WarcoffeProvider({ children }: { children: React.ReactNode }) {
       if (error) return { ok: false, errors: [error.message] };
     }
 
-    const updated = [newExpense, ...expenses];
-    setExpenses(updated);
-    persistLocalState({ expenses: updated });
+    setExpenses((previous) => {
+      const updated = [newExpense, ...previous];
+      persistLocalState({ expenses: updated });
+      return updated;
+    });
 
     await appendAuditLog({
       action_type:

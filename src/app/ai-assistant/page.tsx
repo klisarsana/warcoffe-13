@@ -23,14 +23,19 @@ import {
 import {
   AI_ENDPOINTS,
   getConfiguredAIServiceUrl,
-  requestTransactionDraftFromText,
+  requestTransactionDraftsFromText,
   sendBusinessAssistantQuestion,
 } from "@/lib/ai-adapter";
 import {
   calculateMonthlySummary,
   getLowStockMenuItems,
 } from "@/lib/calculations";
-import { formatIDR, getCurrentMonthKey, getLocalDateKey } from "@/lib/format";
+import {
+  formatDateID,
+  formatIDR,
+  getCurrentMonthKey,
+  getLocalDateKey,
+} from "@/lib/format";
 import { EXPENSE_CATEGORIES } from "@/lib/menu-seed-data";
 
 const SUGGESTED_QUESTIONS = [
@@ -62,10 +67,14 @@ export default function AIAssistantPage() {
   // Text-to-Transaction Draft state
   const [rawDraftText, setRawDraftText] = useState<string>("");
   const [isParsingDraft, setIsParsingDraft] = useState<boolean>(false);
-  const [draftResult, setDraftResult] =
-    useState<AITransactionDraftResponse | null>(null);
+  const [isSavingDrafts, setIsSavingDrafts] = useState<boolean>(false);
+  const [draftResults, setDraftResults] = useState<
+    AITransactionDraftResponse[]
+  >([]);
+  const [draftResponseMessage, setDraftResponseMessage] =
+    useState<string>("");
   const [draftConfirmationNotice, setDraftConfirmationNotice] = useState<{
-    type: "success" | "error";
+    type: "success" | "warning" | "error";
     text: string;
   } | null>(null);
 
@@ -147,33 +156,55 @@ export default function AIAssistantPage() {
     setIsChatLoading(false);
   };
 
-  const handleParseTextDraft = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setDraftConfirmationNotice(null);
-    setIsParsingDraft(true);
-
-    const res = await requestTransactionDraftFromText({
-      rawText: rawDraftText,
-      availableMenuNames: menuItems.map((m) => m.name),
+  const buildDraftCartItems = (
+    draft: AITransactionDraftResponse
+  ): CartItem[] => {
+    return draft.items.map((item, idx) => {
+      const matchedMenu = menuItems.find(
+        (m) =>
+          m.id === item.matched_menu_item_id ||
+          m.name.toLowerCase() === item.item_name.toLowerCase()
+      );
+      const unitPrice =
+        item.unit_price ??
+        matchedMenu?.default_price ??
+        matchedMenu?.hot_price ??
+        0;
+      return {
+        cart_item_id: `ai-draft-${draft.transaction_date}-${idx}`,
+        menu_item_id: matchedMenu?.id || `custom-${idx}`,
+        menu_name: matchedMenu?.name || item.item_name,
+        category_id: matchedMenu?.category_id || "cat-racikan",
+        category_name:
+          (matchedMenu && categoryNameMap.get(matchedMenu.category_id)) ||
+          draft.predicted_category ||
+          "Penjualan",
+        variant_key: "DEFAULT",
+        variant_label: item.variant_label || "Standar",
+        unit_price: unitPrice,
+        quantity: item.quantity,
+        line_total: unitPrice * item.quantity,
+      };
     });
-
-    setDraftResult(res);
-    setIsParsingDraft(false);
   };
 
-  const handleConfirmAndSaveDraft = async () => {
-    if (!draftResult) return;
+  const saveDraftToDatabase = async (
+    draft: AITransactionDraftResponse
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (draft.status !== "SUCCESS") {
+      return { ok: false, error: "Draft belum berstatus SUCCESS." };
+    }
 
-    if (draftResult.draft_type === "EXPENSE") {
-      const amount = draftResult.total_amount ?? 0;
+    if (draft.draft_type === "EXPENSE") {
+      const amount = draft.total_amount ?? 0;
       const res = await createExpense({
-        expense_date: draftResult.transaction_date || getLocalDateKey(),
+        expense_date: draft.transaction_date || getLocalDateKey(),
         description:
-          draftResult.expense_description ||
-          rawDraftText.trim() ||
+          draft.expense_description ||
+          draft.source_text?.trim() ||
           "Pengeluaran Draft AI",
-        category: EXPENSE_CATEGORIES.includes(draftResult.predicted_category)
-          ? draftResult.predicted_category
+        category: EXPENSE_CATEGORIES.includes(draft.predicted_category)
+          ? draft.predicted_category
           : "Bahan Baku & Kemasan",
         amount,
         note: "Dikonfirmasi pemilik dari draft AI Assistant",
@@ -181,76 +212,186 @@ export default function AIAssistantPage() {
       });
 
       if (!res.ok) {
-        setDraftConfirmationNotice({
-          type: "error",
-          text: (res.errors || ["Gagal menyimpan draft pengeluaran."]).join(" "),
-        });
-        return;
+        return {
+          ok: false,
+          error: (res.errors || ["Gagal menyimpan draft pengeluaran."]).join(
+            " "
+          ),
+        };
       }
-
-      setDraftResult(null);
-      setRawDraftText("");
-      setDraftConfirmationNotice({
-        type: "success",
-        text: "Draft pengeluaran telah dikonfirmasi pemilik dan disimpan ke database.",
-      });
-      return;
+      return { ok: true };
     }
 
-    if (draftResult.draft_type === "INCOME_SALE") {
-      const cartItems: CartItem[] = draftResult.items.map((item, idx) => {
-        const matchedMenu = menuItems.find(
-          (m) =>
-            m.id === item.matched_menu_item_id ||
-            m.name.toLowerCase() === item.item_name.toLowerCase()
-        );
-        const unitPrice =
-          item.unit_price ??
-          matchedMenu?.default_price ??
-          matchedMenu?.hot_price ??
-          0;
-        return {
-          cart_item_id: `ai-draft-${idx}`,
-          menu_item_id: matchedMenu?.id || `custom-${idx}`,
-          menu_name: matchedMenu?.name || item.item_name,
-          category_id: matchedMenu?.category_id || "cat-racikan",
-          category_name:
-            (matchedMenu && categoryNameMap.get(matchedMenu.category_id)) ||
-            draftResult.predicted_category ||
-            "Penjualan",
-          variant_key: "DEFAULT",
-          variant_label: item.variant_label || "Standar",
-          unit_price: unitPrice,
-          quantity: item.quantity,
-          line_total: unitPrice * item.quantity,
-        };
-      });
+    if (draft.draft_type === "INCOME_SALE") {
+      const cartItems = buildDraftCartItems(draft);
+      if (cartItems.length === 0) {
+        return { ok: false, error: "Draft penjualan tidak memiliki item." };
+      }
 
-      const total = cartItems.reduce((s, i) => s + i.line_total, 0);
+      const total = cartItems.reduce((sum, item) => sum + item.line_total, 0);
       const res = await createSaleTransaction({
         cart: cartItems,
-        paymentMethod: "TUNAI",
+        paymentMethod: draft.payment_method || "TUNAI",
         amountPaid: total,
+        transactionDate: draft.transaction_date,
         customerNote: "Dikonfirmasi pemilik dari draft teks AI",
         source: "AI_DRAFT_CONFIRMED",
       });
 
       if (!res.ok) {
-        setDraftConfirmationNotice({
-          type: "error",
-          text: (res.errors || ["Gagal menyimpan draft penjualan."]).join(" "),
-        });
-        return;
+        return {
+          ok: false,
+          error: (res.errors || ["Gagal menyimpan draft penjualan."]).join(
+            " "
+          ),
+        };
       }
+      return { ok: true };
+    }
 
-      setDraftResult(null);
-      setRawDraftText("");
+    return { ok: false, error: "Jenis draft tidak dikenali." };
+  };
+
+  const handleParseTextDraft = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = rawDraftText.trim();
+    setDraftConfirmationNotice(null);
+
+    if (!trimmed) {
+      setDraftResults([]);
+      setDraftResponseMessage(
+        "Teks input tidak boleh kosong. Masukkan kalimat transaksi terlebih dahulu."
+      );
       setDraftConfirmationNotice({
-        type: "success",
-        text: "Draft transaksi penjualan telah dikonfirmasi pemilik dan disimpan.",
+        type: "error",
+        text: "Teks input tidak boleh kosong.",
+      });
+      return;
+    }
+
+    setIsParsingDraft(true);
+    setDraftResults([]);
+    setDraftResponseMessage("");
+
+    const res = await requestTransactionDraftsFromText({
+      rawText: trimmed,
+      availableMenuNames: menuItems.map((m) => m.name),
+    });
+
+    setDraftResults(res.drafts);
+    setDraftResponseMessage(res.assistant_message);
+    if (res.status === "SERVICE_UNAVAILABLE") {
+      setDraftConfirmationNotice({
+        type: "error",
+        text: res.assistant_message,
       });
     }
+    setIsParsingDraft(false);
   };
+
+  const handleDraftTextareaKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
+      return;
+    }
+
+    // Di layar mobile/tablet, Enter tetap dipakai untuk membuat baris baru.
+    if (!window.matchMedia("(min-width: 1024px)").matches) {
+      return;
+    }
+
+    e.preventDefault();
+    if (isParsingDraft || isSavingDrafts) return;
+    e.currentTarget.form?.requestSubmit();
+  };
+
+  const handleSaveAllDrafts = async () => {
+    if (isSavingDrafts) return;
+
+    const validDrafts = draftResults.filter(
+      (draft) => draft.status === "SUCCESS"
+    );
+    if (validDrafts.length === 0) {
+      setDraftConfirmationNotice({
+        type: "error",
+        text: "Tidak ada draft valid yang bisa disimpan. Periksa data yang masih kurang.",
+      });
+      return;
+    }
+
+    setIsSavingDrafts(true);
+    setDraftConfirmationNotice(null);
+
+    let savedCount = 0;
+    const failedDrafts: AITransactionDraftResponse[] = [];
+    const failureMessages: string[] = [];
+
+    for (const draft of validDrafts) {
+      try {
+        const result = await saveDraftToDatabase(draft);
+        if (result.ok) {
+          savedCount += 1;
+        } else {
+          failedDrafts.push(draft);
+          if (result.error) failureMessages.push(result.error);
+        }
+      } catch (err) {
+        failedDrafts.push(draft);
+        failureMessages.push(
+          err instanceof Error ? err.message : "Gagal menyimpan draft."
+        );
+      }
+    }
+
+    const remainingDrafts = draftResults.filter(
+      (draft) =>
+        draft.status !== "SUCCESS" || failedDrafts.includes(draft)
+    );
+    const unsavedSourceText = remainingDrafts
+      .map((draft) => draft.source_text?.trim() || "")
+      .filter(Boolean)
+      .join("\n");
+
+    setDraftResults(remainingDrafts);
+    setRawDraftText(remainingDrafts.length === 0 ? "" : unsavedSourceText);
+    setDraftResponseMessage("");
+    setIsSavingDrafts(false);
+
+    if (savedCount > 0 && remainingDrafts.length === 0) {
+      setDraftConfirmationNotice({
+        type: "success",
+        text: `${savedCount} draft berhasil disimpan dengan tanggal masing-masing.`,
+      });
+      return;
+    }
+
+    if (savedCount > 0) {
+      setDraftConfirmationNotice({
+        type: "warning",
+        text: `${savedCount} draft tersimpan. ${remainingDrafts.length} draft belum tersimpan dan tetap ditampilkan. Teks input diisi ulang hanya untuk draft yang belum tersimpan.`,
+      });
+      return;
+    }
+
+    setDraftConfirmationNotice({
+      type: "error",
+      text:
+        failureMessages.join(" ") ||
+        "Tidak ada draft yang berhasil disimpan.",
+    });
+  };
+
+  const handleRejectAllDrafts = () => {
+    setDraftResults([]);
+    setDraftResponseMessage("");
+    setDraftConfirmationNotice(null);
+  };
+
+  const validDraftCount = draftResults.filter(
+    (draft) => draft.status === "SUCCESS"
+  ).length;
+  const invalidDraftCount = draftResults.length - validDraftCount;
 
   return (
     <div className="space-y-6">
@@ -476,7 +617,11 @@ export default function AIAssistantPage() {
               </h2>
               <p className="text-xs text-espresso-600 mt-0.5">
                 Mengirim kalimat ke endpoint FastAPI{" "}
-                <code>POST {AI_ENDPOINTS.PARSE_TRANSACTION}</code> (LLM API + Model Klasifikasi Kategori).
+                <code>POST {AI_ENDPOINTS.PARSE_TRANSACTIONS}</code> (parser aturan + model klasifikasi kategori).
+                Setiap tanggal dapat ditulis pada baris terpisah, misalnya{" "}
+                <em>10 November terjual 5 kopi</em>. Format tanggal lain:{" "}
+                <em>kemarin</em>, <em>3 hari lalu</em>,{" "}
+                <em>20 November 2026</em>, atau <em>20/11/2026</em>.
               </p>
             </div>
 
@@ -485,12 +630,29 @@ export default function AIAssistantPage() {
                 Masukkan Kalimat Transaksi
               </label>
               <textarea
-                rows={4}
+                rows={5}
+                maxLength={4000}
                 value={rawDraftText}
                 onChange={(e) => setRawDraftText(e.target.value)}
-                placeholder='Contoh: "beli kopi hitam panas 2, indomie telur 1" atau "beli gas elpiji dan es batu Rp35.000"'
+                onKeyDown={handleDraftTextareaKeyDown}
+                placeholder={`Contoh:\n10 november terjual 5 kopi\n7 november terjual 3 indomie`}
                 className="w-full p-3 rounded-xl border border-espresso-200 text-xs focus:outline-none focus:ring-2 focus:ring-caramel-500"
               />
+              <div className="mt-1 flex items-center justify-between gap-3 text-[10px] text-espresso-500">
+                <span className="hidden lg:inline">
+                  <kbd className="rounded border border-espresso-300 bg-cream-50 px-1 py-0.5 font-sans">
+                    Enter
+                  </kbd>{" "}
+                  buat draft ·{" "}
+                  <kbd className="rounded border border-espresso-300 bg-cream-50 px-1 py-0.5 font-sans">
+                    Shift+Enter
+                  </kbd>{" "}
+                  baris baru
+                </span>
+                <span className="ml-auto shrink-0">
+                  {rawDraftText.length}/4000 karakter
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -512,12 +674,34 @@ export default function AIAssistantPage() {
               >
                 Contoh Pengeluaran
               </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setRawDraftText(
+                    "laku Kopi Liong panas 2 tanggal 20 November 2026"
+                  )
+                }
+                className="px-2.5 py-1 rounded-lg bg-cream-100 text-espresso-800 text-[11px] font-medium hover:bg-espresso-100"
+              >
+                Contoh dengan Tanggal
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setRawDraftText(
+                    "10 november terjual 5 kopi\n7 november terjual 3 indomie"
+                  )
+                }
+                className="px-2.5 py-1 rounded-lg bg-espresso-100 text-espresso-900 text-[11px] font-semibold hover:bg-espresso-200"
+              >
+                Contoh Multi-Tanggal
+              </button>
             </div>
 
             <button
               type="submit"
-              disabled={isParsingDraft}
-              className="w-full py-2.5 rounded-xl bg-espresso-900 hover:bg-espresso-800 text-cream-50 text-xs font-bold inline-flex items-center justify-center gap-2"
+              disabled={isParsingDraft || isSavingDrafts}
+              className="w-full py-2.5 rounded-xl bg-espresso-900 hover:bg-espresso-800 disabled:bg-espresso-300 text-cream-50 text-xs font-bold inline-flex items-center justify-center gap-2"
             >
               {isParsingDraft ? (
                 <>
@@ -544,6 +728,8 @@ export default function AIAssistantPage() {
                 className={`p-3.5 rounded-xl border text-xs font-medium ${
                   draftConfirmationNotice.type === "success"
                     ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                    : draftConfirmationNotice.type === "warning"
+                    ? "bg-amber-50 border-amber-300 text-amber-950"
                     : "bg-rose-50 border-rose-300 text-rose-900"
                 }`}
               >
@@ -551,93 +737,221 @@ export default function AIAssistantPage() {
               </div>
             )}
 
-            {!draftResult ? (
+            {draftResults.length === 0 ? (
               <div className="py-12 px-4 text-center bg-cream-50 rounded-xl border border-dashed border-espresso-200">
                 <FileText className="w-8 h-8 text-espresso-400 mx-auto mb-2" />
                 <p className="text-sm font-semibold text-espresso-800">
-                  Belum Ada Draft yang Diproses
+                  {draftResponseMessage
+                    ? "Tidak Ada Draft yang Dapat Disimpan"
+                    : "Belum Ada Draft yang Diproses"}
                 </p>
                 <p className="text-xs text-espresso-600 mt-1 max-w-sm mx-auto">
-                  Hasil ekstraksi dari layanan AI tidak akan pernah langsung disimpan ke database tanpa pemeriksaan dan konfirmasi pemilik di panel ini.
+                  {draftResponseMessage ||
+                    "Hasil ekstraksi dari layanan AI tidak akan pernah langsung disimpan ke database tanpa pemeriksaan dan konfirmasi pemilik di panel ini."}
                 </p>
               </div>
             ) : (
               <div className="space-y-3 text-xs">
-                <div
-                  className={`p-3.5 rounded-xl border ${
-                    draftResult.status === "SUCCESS"
-                      ? "bg-emerald-50 border-emerald-300 text-emerald-950"
-                      : "bg-amber-50 border-amber-300 text-amber-950"
-                  }`}
-                >
-                  <p className="font-bold">
-                    Status Layanan AI: {draftResult.status}
-                  </p>
-                  <p className="mt-1">{draftResult.assistant_message}</p>
+                <div className="p-3.5 rounded-xl border border-espresso-200 bg-cream-50">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-espresso-900">
+                        {draftResults.length} Draft Transaksi
+                      </p>
+                      {draftResponseMessage && (
+                        <p className="mt-1 text-espresso-700">
+                          {draftResponseMessage}
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 rounded-full bg-espresso-900 px-2.5 py-1 text-[10px] font-bold text-cream-50">
+                      {validDraftCount} valid
+                    </span>
+                  </div>
+                  {invalidDraftCount > 0 && (
+                    <p className="mt-2 font-semibold text-amber-800">
+                      {invalidDraftCount} draft belum valid dan tidak akan
+                      disimpan.
+                    </p>
+                  )}
                 </div>
 
-                {draftResult.status === "SUCCESS" && (
-                  <div className="p-4 rounded-xl bg-cream-50 border border-espresso-200 space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-espresso-600">Jenis Draft:</span>
-                      <span className="font-bold">{draftResult.draft_type}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-espresso-600">
-                        Prediksi Kategori (Model Klasifikasi):
-                      </span>
-                      <span className="font-bold">
-                        {draftResult.predicted_category}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-espresso-600">Estimasi Nominal:</span>
-                      <span className="font-bold">
-                        {formatIDR(draftResult.total_amount)}
-                      </span>
-                    </div>
+                {draftResults.map((draft, index) => {
+                  const typeLabel =
+                    draft.draft_type === "INCOME_SALE"
+                      ? "Penjualan"
+                      : draft.draft_type === "EXPENSE"
+                      ? "Pengeluaran"
+                      : "Tidak Dikenali";
 
-                    <div className="pt-3 flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setDraftResult(null)}
-                        className="px-3.5 py-2 rounded-xl border border-espresso-300 font-semibold"
-                      >
-                        Tolak Draft
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleConfirmAndSaveDraft}
-                        className="px-4 py-2 rounded-xl bg-espresso-900 text-cream-50 font-bold inline-flex items-center gap-1.5"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        Konfirmasi & Simpan ke Database
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  return (
+                    <div
+                      key={`${draft.transaction_date}-${draft.draft_type}-${index}`}
+                      className="rounded-xl border border-espresso-200 bg-cream-50 overflow-hidden"
+                    >
+                      <div className="flex items-start justify-between gap-3 border-b border-espresso-200 bg-white/70 px-3.5 py-3">
+                        <div>
+                          <p className="text-sm font-bold text-espresso-900">
+                            {formatDateID(draft.transaction_date)}
+                          </p>
+                          <p className="text-[11px] text-espresso-600">
+                            {typeLabel} · {draft.transaction_date}
+                          </p>
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                            draft.status === "SUCCESS"
+                              ? "bg-emerald-100 text-emerald-900"
+                              : draft.status === "INCOMPLETE"
+                              ? "bg-amber-100 text-amber-900"
+                              : "bg-rose-100 text-rose-900"
+                          }`}
+                        >
+                          {draft.status}
+                        </span>
+                      </div>
 
-                {draftResult.status !== "SUCCESS" && (
-                  <div className="p-3.5 rounded-xl bg-cream-50 border border-espresso-200 flex items-center justify-between">
-                    <span className="text-espresso-700">
-                      Gunakan pencatatan manual selama layanan FastAPI belum aktif:
-                    </span>
-                    <div className="flex gap-2">
-                      <Link
-                        href="/pos"
-                        className="px-3 py-1.5 rounded-lg bg-espresso-900 text-cream-50 font-bold"
-                      >
-                        Ke Kasir (POS)
-                      </Link>
-                      <Link
-                        href="/expenses"
-                        className="px-3 py-1.5 rounded-lg border border-espresso-300 text-espresso-900 font-bold"
-                      >
-                        Ke Pengeluaran
-                      </Link>
+                      <div className="p-3.5 space-y-2">
+                        {draft.source_text && (
+                          <p className="rounded-lg border border-espresso-200 bg-white/70 px-3 py-2 text-[11px] italic text-espresso-700">
+                            &ldquo;{draft.source_text}&rdquo;
+                          </p>
+                        )}
+
+                        {draft.status === "SUCCESS" &&
+                          draft.draft_type === "INCOME_SALE" &&
+                          draft.items.length > 0 && (
+                            <div className="space-y-1.5">
+                              <p className="font-semibold text-espresso-600">
+                                Item Terdeteksi:
+                              </p>
+                              {draft.items.map((item, itemIndex) => (
+                                <div
+                                  key={`${item.item_name}-${itemIndex}`}
+                                  className="flex justify-between gap-3 rounded-lg border border-espresso-200 bg-white/70 px-3 py-2"
+                                >
+                                  <div>
+                                    <p className="font-bold text-espresso-900">
+                                      {item.quantity}x {item.item_name}
+                                    </p>
+                                    <p className="text-[11px] text-espresso-600">
+                                      {item.variant_label} · confidence{" "}
+                                      {(item.confidence * 100).toFixed(0)}%
+                                    </p>
+                                  </div>
+                                  <span className="whitespace-nowrap font-semibold">
+                                    {formatIDR(item.line_total)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                        {draft.expense_description && (
+                          <div className="flex justify-between gap-3 rounded-lg border border-espresso-200 bg-white/70 px-3 py-2">
+                            <span className="text-espresso-600">
+                              Deskripsi Pengeluaran:
+                            </span>
+                            <span className="text-right font-semibold">
+                              {draft.expense_description}
+                            </span>
+                          </div>
+                        )}
+
+                        {draft.status !== "SUCCESS" && (
+                          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
+                            <p>{draft.assistant_message}</p>
+                            {draft.missing_fields.length > 0 && (
+                              <p className="mt-1 font-semibold">
+                                Data yang masih kurang:{" "}
+                                {draft.missing_fields.join(", ")}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <div className="rounded-lg border border-espresso-200 bg-white/70 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-espresso-500">
+                              Kategori Model
+                            </p>
+                            <p className="mt-0.5 font-semibold">
+                              {draft.predicted_category}
+                            </p>
+                          </div>
+                          {draft.draft_type === "INCOME_SALE" && (
+                            <div className="rounded-lg border border-espresso-200 bg-white/70 px-3 py-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-espresso-500">
+                                Metode Pembayaran
+                              </p>
+                              <p className="mt-0.5 font-semibold">
+                                {draft.payment_method || "TUNAI"}
+                              </p>
+                            </div>
+                          )}
+                          <div className="rounded-lg border border-espresso-200 bg-white/70 px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-espresso-500">
+                              Confidence
+                            </p>
+                            <p className="mt-0.5 font-semibold">
+                              {typeof draft.confidence_score === "number"
+                                ? `${(draft.confidence_score * 100).toFixed(1)}%`
+                                : "-"}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-espresso-200 bg-white/70 px-3 py-2 sm:col-span-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-espresso-500">
+                              Model Digunakan
+                            </p>
+                            <p className="mt-0.5 font-semibold">
+                              {draft.classifier_model_used || "-"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between border-t border-espresso-200 pt-2">
+                          <span className="text-espresso-600">
+                            Estimasi Nominal:
+                          </span>
+                          <span className="font-bold">
+                            {formatIDR(draft.total_amount)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
+                  );
+                })}
+
+                <div className="rounded-xl border border-espresso-200 bg-cream-50 p-3.5">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRejectAllDrafts}
+                      disabled={isSavingDrafts}
+                      className="rounded-xl border border-espresso-300 px-3.5 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Tolak Semua
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveAllDrafts}
+                      disabled={isSavingDrafts || validDraftCount === 0}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-espresso-900 px-4 py-2 font-bold text-cream-50 disabled:cursor-not-allowed disabled:bg-espresso-300"
+                    >
+                      {isSavingDrafts ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" />
+                      )}
+                      {isSavingDrafts
+                        ? "Menyimpan Semua Draft..."
+                        : `Simpan Semua Draft Valid (${validDraftCount})`}
+                    </button>
                   </div>
-                )}
+                  <p className="mt-2 text-right text-[11px] text-espresso-500">
+                    Draft invalid tetap ditampilkan dan tidak akan disimpan.
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -664,41 +978,45 @@ export default function AIAssistantPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-2">
               <h3 className="font-bold text-sm text-espresso-900">
-                1. Endpoint Ekstraksi Teks ke Draft Transaksi
+                1. Endpoint Ekstraksi Teks Multi-Tanggal
               </h3>
               <p className="text-espresso-600">
-                <code>POST {"{AI_SERVICE_URL}"}/api/v1/parse-transaction</code>
+                <code>POST {"{AI_SERVICE_URL}"}/api/v1/parse-transactions</code>
+                <br />
+                Endpoint singular <code>/api/v1/parse-transaction</code> tetap
+                tersedia untuk kompatibilitas.
               </p>
               <pre className="p-3.5 rounded-xl bg-espresso-950 text-cream-100 overflow-x-auto text-[11px] leading-relaxed">
 {`// Request Body dari Next.js Web App:
 {
-  "text": "beli kopi hitam 2, es teh manis 1",
-  "menu_catalog_hints": ["Kopi Hitam", "Teh Manis", "..."]
+  "text": "10 november terjual 5 kopi qris\\n7 november terjual 3 indomie",
+  "menu_catalog_hints": ["Kopi Hitam", "Indomie Telur", "..."]
 }
 
 // Expected Response Body dari FastAPI (AE/DS):
 {
-  "status": "SUCCESS", // "SUCCESS" | "INCOMPLETE" | "OUT_OF_CONTEXT"
-  "draft_type": "INCOME_SALE", // "INCOME_SALE" | "EXPENSE"
-  "predicted_category": "Minuman Racikan / Sachet",
-  "classifier_model_used": "IndoBERT-v1",
-  "confidence_score": 0.94,
-  "transaction_date": "2026-11-20",
-  "items": [
+  "status": "SUCCESS", // "SUCCESS" | "PARTIAL" | "INCOMPLETE" | "OUT_OF_CONTEXT" | "SERVICE_UNAVAILABLE"
+  "drafts": [
     {
-      "raw_item_text": "kopi hitam 2",
-      "matched_menu_item_id": "mr-01",
-      "item_name": "Kopi Hitam",
-      "variant_label": "Panas",
-      "quantity": 2,
-      "unit_price": 4000,
-      "line_total": 8000,
-      "confidence": 0.96
+      "status": "SUCCESS",
+      "draft_type": "INCOME_SALE",
+      "transaction_date": "2026-11-10",
+      "payment_method": "QRIS", // TUNAI | QRIS | TRANSFER, default TUNAI
+      "source_text": "10 november, terjual 5 kopi qris",
+      "items": [
+        {
+          "item_name": "Kopi Hitam",
+          "quantity": 5,
+          "unit_price": 4000,
+          "line_total": 20000
+        }
+      ],
+      "total_amount": 20000,
+      "assistant_message": "Draft penjualan berhasil dibuat.",
+      "requires_owner_confirmation": true
     }
   ],
-  "total_amount": 8000,
-  "missing_fields": [],
-  "assistant_message": "Draft transaksi berhasil diekstrak.",
+  "assistant_message": "2 draft transaksi berhasil dibuat.",
   "requires_owner_confirmation": true
 }`}
               </pre>

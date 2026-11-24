@@ -15,11 +15,13 @@
 import {
   AIChatRequestPayload,
   AIChatResponsePayload,
+  AIMultiTransactionDraftResponse,
   AITransactionDraftResponse,
 } from "@/types/warcoffe";
 
 export const AI_ENDPOINTS = {
   PARSE_TRANSACTION: "/api/v1/parse-transaction",
+  PARSE_TRANSACTIONS: "/api/v1/parse-transactions",
   BUSINESS_CHAT: "/api/v1/chat",
   HEALTH_CHECK: "/api/v1/health",
 } as const;
@@ -79,6 +81,58 @@ export async function requestTransactionDraftFromText(params: {
       assistant_message: `Layanan FastAPI AI Engineer belum terhubung (${message}). Silakan gunakan pencatatan manual di menu Kasir (POS) atau Pengeluaran.`,
       requires_owner_confirmation: true,
     };
+  }
+}
+
+function multiDraftUnavailable(message: string): AIMultiTransactionDraftResponse {
+  return {
+    status: "SERVICE_UNAVAILABLE",
+    drafts: [],
+    assistant_message: message,
+    requires_owner_confirmation: true,
+  };
+}
+
+/**
+ * Mengirim satu atau beberapa baris transaksi bertanggal ke endpoint plural
+ * `/api/ai/parse-transactions`. Setiap tanggal menghasilkan draft terpisah,
+ * sedangkan tanggal dan jenis transaksi yang sama digabung oleh service AI.
+ */
+export async function requestTransactionDraftsFromText(params: {
+  rawText: string;
+  availableMenuNames: string[];
+}): Promise<AIMultiTransactionDraftResponse> {
+  if (!params.rawText || params.rawText.trim().length === 0) {
+    return {
+      status: "INCOMPLETE",
+      drafts: [],
+      assistant_message:
+        "Teks input tidak boleh kosong. Masukkan kalimat transaksi terlebih dahulu.",
+      requires_owner_confirmation: true,
+    };
+  }
+
+  try {
+    const response = await fetch("/api/ai/parse-transactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: params.rawText.trim(),
+        menu_catalog_hints: params.availableMenuNames,
+      }),
+    });
+
+    const data = (await response.json()) as AIMultiTransactionDraftResponse;
+    return {
+      ...data,
+      drafts: Array.isArray(data.drafts) ? data.drafts : [],
+      requires_owner_confirmation: true,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return multiDraftUnavailable(
+      `Layanan FastAPI AI Engineer belum terhubung (${message}). Silakan gunakan pencatatan manual di menu Kasir (POS) atau Pengeluaran.`
+    );
   }
 }
 
