@@ -5,8 +5,10 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.health import health as health_check
 from app.api.v1.router import router as api_v1_router
 from app.core.config import settings
+from app.schemas.transaction import HealthResponse
 
 
 logging.basicConfig(
@@ -32,6 +34,11 @@ app.add_middleware(
 )
 
 app.include_router(api_v1_router, prefix="/api/v1")
+
+
+@app.get("/health", response_model=HealthResponse, tags=["health"])
+def health_alias() -> HealthResponse:
+    return health_check()
 
 
 @app.get("/")
