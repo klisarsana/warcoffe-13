@@ -606,10 +606,10 @@ export default function AIAssistantPage() {
       {/* TAB 2: TEXT-TO-TRANSACTION DRAFT PARSING                             */}
       {/* ==================================================================== */}
       {activeTab === "TEXT_DRAFT" && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="space-y-6">
           <form
             onSubmit={handleParseTextDraft}
-            className="lg:col-span-6 bg-white rounded-2xl p-5 border border-espresso-200/80 shadow-sm space-y-4"
+            className="bg-white rounded-2xl p-5 border border-espresso-200/80 shadow-sm space-y-4"
           >
             <div>
               <h2 className="text-base font-bold text-espresso-900">
@@ -718,7 +718,7 @@ export default function AIAssistantPage() {
           </form>
 
           {/* Draft Preview & Owner Confirmation Panel */}
-          <div className="lg:col-span-6 bg-white rounded-2xl p-5 border border-espresso-200/80 shadow-sm space-y-4">
+          <div className="bg-white rounded-2xl p-5 border border-espresso-200/80 shadow-sm space-y-4">
             <h2 className="text-base font-bold text-espresso-900">
               Pratinjau Draft & Konfirmasi Pemilik
             </h2>
