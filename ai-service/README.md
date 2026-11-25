@@ -1,6 +1,6 @@
-# Warcoffe 13 — AI Text-to-Draft Service
+# Warcoffe 13 — AI Text-to-Draft & Business Chat Service
 
-Service Python/FastAPI yang mengubah kalimat transaksi sehari-hari menjadi **draft transaksi** yang wajib dikonfirmasi pemilik sebelum disimpan ke database.
+Service Python/FastAPI yang mengubah kalimat transaksi sehari-hari menjadi **draft transaksi** yang wajib dikonfirmasi pemilik sebelum disimpan ke database, serta menjawab pertanyaan bisnis dari ringkasan data.
 
 Model utama memakai **TF-IDF (word + char n-gram)** dengan classifier linear untuk memprediksi kategori menu:
 
@@ -8,7 +8,7 @@ Model utama memakai **TF-IDF (word + char n-gram)** dengan classifier linear unt
 - `Minuman Racikan / Sachet`
 - `Makanan`
 
-Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategori pengeluaran ditangani oleh parser berbasis aturan. Service tidak memanggil LLM eksternal sehingga dapat berjalan lokal tanpa API key dan tetap di bawah timeout proxy Next.js (15 detik).
+Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategori pengeluaran ditangani oleh parser berbasis aturan. Endpoint `POST /api/v1/chat` memakai Gemini untuk menjawab pertanyaan bisnis dari `context_summary`; jika Gemini gagal atau API key tidak tersedia, service memakai fallback aturan deterministik. Service tetap dapat berjalan tanpa API key, tetapi jawaban chat akan selalu memakai fallback.
 
 ---
 
@@ -17,7 +17,7 @@ Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategor
 ```text
 ai-service/
 ├── app/
-│   ├── api/v1/                 # Endpoint FastAPI (/health, /parse-transaction, /parse-transactions)
+│   ├── api/v1/                 # Endpoint FastAPI (/health, /parse-transaction, /chat)
 │   ├── core/config.py          # Konfigurasi path & environment
 │   ├── ml/
 │   │   ├── catalog.py          # Load katalog menu
@@ -26,7 +26,7 @@ ai-service/
 │   │   └── training.py         # Training, evaluasi, perbandingan model
 │   ├── parsers/                # Parser uang, kuantitas, tanggal
 │   ├── schemas/                # Pydantic request/response
-│   ├── services/               # Intent, item, expense, menu matcher
+│   ├── services/               # Intent, chat Gemini + fallback, menu matcher
 │   └── main.py                 # Entry point FastAPI
 ├── data/
 │   ├── menu_catalog.json       # 57 item menu (hasil export dari seed TypeScript)
@@ -53,6 +53,19 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+Konfigurasi Gemini bersifat opsional. Salin `.env.example` menjadi `.env` (atau `.env.local`) lalu isi:
+
+```bash
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_FALLBACK_MODEL=gemini-3.8-flash
+GEMINI_TIMEOUT_SECONDS=8
+GEMINI_TOTAL_BUDGET_SECONDS=10
+GEMINI_MAX_OUTPUT_TOKENS=512
+```
+
+Tanpa `GEMINI_API_KEY`, endpoint chat tetap merespons memakai fallback aturan.
 
 Export ulang katalog menu jika `src/lib/menu-seed-data.ts` berubah:
 
@@ -162,6 +175,12 @@ Next.js /ai-assistant
   -> parser aturan + model kategori per blok
   -> daftar draft JSON
   -> konfirmasi pemilik & simpan semua draft valid
+
+Next.js chat bisnis
+  -> POST /api/ai/chat (proxy Next.js)
+  -> POST http://localhost:8000/api/v1/chat
+  -> Gemini (model utama, lalu model cadangan saat 429)
+  -> fallback aturan bila LLM gagal
 ```
 
 Endpoint singular tetap tersedia untuk kompatibilitas.
@@ -360,7 +379,55 @@ Frasa metode pembayaran dan kata penghubung seperti `via`/`pakai` dibuang sebelu
 
 ---
 
-## 6. Notebook
+## 6. Endpoint `POST /api/v1/chat`
+
+Request:
+
+```json
+{
+  "question": "Berapa omzet bulan ini?",
+  "context_summary": {
+    "current_month": "2026-11",
+    "monthly_revenue": 150000,
+    "monthly_expenses": 45000,
+    "net_difference": 105000,
+    "transaction_count": 12,
+    "top_selling_items": [
+      { "name": "Kopi Liong", "qty": 10, "revenue": 50000 }
+    ],
+    "low_stock_items": [
+      { "name": "Gula", "current_stock": 2, "min_threshold": 5 }
+    ]
+  }
+}
+```
+
+Response sukses Gemini:
+
+```json
+{
+  "status": "SUCCESS",
+  "answer": "Omzet Warcoffe 13 pada bulan November 2026 adalah Rp150.000.",
+  "referenced_metrics": ["monthly_revenue", "current_month"]
+}
+```
+
+Perilaku:
+
+- `status` hanya `SUCCESS` atau `OUT_OF_CONTEXT`; `referenced_metrics` hanya berisi key yang benar-benar dipakai dari `context_summary`.
+- Model utama memakai `thinking_level=MINIMAL` (level terendah yang didukung SDK dan model); model cadangan memakai `LOW`. Parameter `temperature`, `top_p`, dan `top_k` tidak dipakai.
+- Anggaran total chat 10 detik (`GEMINI_TOTAL_BUDGET_SECONDS`), lebih rendah dari batas 12 detik proxy Next.js. Setiap percobaan hanya memakai sisa anggaran; jika tersisa ≤2 detik, percobaan berikutnya dilewati dan fallback aturan langsung dipakai.
+- Retry satu kali hanya untuk error sementara dan jika waktu masih cukup. Model cadangan hanya dicoba untuk 429 atau error model, bukan untuk timeout.
+- Setiap panggilan Gemini dicatat dengan model, durasi (ms), dan hasil (`success`/`timeout`/`429`/`error`); payload dan API key tidak dicatat.
+- `error_code` pada respons fallback:
+  - `LLM_QUOTA`: model utama dan model cadangan sama-sama 429.
+  - `LLM_TIMEOUT`: timeout atau anggaran habis.
+  - `LLM_FALLBACK`: kegagalan lain, termasuk output tidak valid setelah retry.
+- Respons sukses Gemini tidak membawa `error_code`. Status bisnis tetap HTTP 200; hanya request tidak valid (misalnya `question` kosong) yang menghasilkan HTTP 422.
+
+---
+
+## 7. Notebook
 
 Buka dan jalankan:
 
@@ -383,7 +450,7 @@ Notebook memakai modul bersama di `app/ml/` agar logika training tidak terduplik
 
 ---
 
-## 7. Tests
+## 8. Tests
 
 ```bash
 cd ai-service
@@ -400,14 +467,18 @@ Cakupan tes:
 - endpoint API untuk status `SUCCESS`, `INCOMPLETE`, `OUT_OF_CONTEXT`,
 - endpoint multi-tanggal: dua tanggal, tanggal sama digabung, penjualan dan pengeluaran pada tanggal yang sama, baris tanpa tanggal, serta status `PARTIAL`,
 - metode pembayaran `TUNAI`/`QRIS`/`TRANSFER`, default tunai, dan pemisahan draft penjualan dengan metode berbeda pada tanggal yang sama,
-- prediksi model pada contoh jelas.
+- prediksi model pada contoh jelas,
+- chat fallback deterministik,
+- chat Gemini: sukses, out-of-context, JSON rusak, exception, timeout, kuota, perpindahan ke model cadangan, dan API key tidak ada.
 
 ---
 
-## 8. Catatan & Batasan
+## 9. Catatan & Batasan
 
 - Dataset latih bersifat sintetis dan dibangun dari 57 menu resmi. Akurasi pada kalimat nyata perlu dipantau dan dataset dapat ditambah dari koreksi pemilik.
 - Model hanya memprediksi kategori menu. Nama item dan harga tetap diverifikasi lewat pencocokan katalog + aturan; UI menampilkan hasilnya untuk dikonfirmasi pemilik.
 - Teks penjualan campuran (misalnya minuman + makanan) hanya memiliki satu `predicted_category`. Nilai ini adalah prediksi untuk keseluruhan kalimat; kategori tiap item tetap diambil dari katalog saat disimpan.
-- Endpoint AI Business Assistant chat tidak diimplementasikan di service ini karena berada di luar cakupan fitur text-to-draft.
+- Endpoint chat memakai Gemini dengan fallback aturan. Simpan `GEMINI_API_KEY` di `.env` atau `.env.local`; jangan commit file tersebut. Tanpa API key, chat tetap berjalan memakai fallback.
+- Model default adalah `gemini-3.5-flash-lite` dengan cadangan `gemini-3.8-flash`. Jika sebuah model dihentikan oleh Google, perbarui `GEMINI_MODEL`/`GEMINI_FALLBACK_MODEL`; fallback aturan tetap menjaga endpoint merespons.
+- Gemini 3.x tidak memakai `temperature`, `top_p`, atau `top_k`; konfigurasi thinking memakai `thinking_level=LOW` agar kompatibel dengan model utama dan cadangan.
 - Model artifact dibuat ulang dengan `python scripts/train_model.py`; jangan mengedit `model_metadata.json` secara manual.
