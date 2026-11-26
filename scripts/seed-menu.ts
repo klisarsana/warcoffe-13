@@ -3,6 +3,9 @@
 // Capstone Project Asah 2026 | Team ID: A26-CS187
 // ============================================================================
 // Jalankan di server/CLI dengan: npm run seed
+// Script ini membaca environment variables dari shell dan TIDAK otomatis memuat .env.local.
+// Jika memakai .env.local, ekspor dulu:
+//   set -a; source .env.local; set +a; npm run seed
 //
 // ATURAN KEAMANAN:
 // 1. Script administratif ini MEWAJIBKAN variabel server-only SUPABASE_SERVICE_ROLE_KEY.

@@ -10,6 +10,27 @@ Model utama memakai **TF-IDF (word + char n-gram)** dengan classifier linear unt
 
 Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategori pengeluaran ditangani oleh parser berbasis aturan. Endpoint `POST /api/v1/chat` memakai Gemini untuk menjawab pertanyaan bisnis dari `context_summary`; jika Gemini gagal atau API key tidak tersedia, service memakai fallback aturan deterministik. Service tetap dapat berjalan tanpa API key, tetapi jawaban chat akan selalu memakai fallback.
 
+**Dokumen ini untuk:** AI Engineer, Data Scientist, atau developer yang mengelola service AI. Untuk gambaran aplikasi dan deployment website, lihat [README utama](../README.md) dan [Panduan Deployment](../docs/DEPLOYMENT.md).
+
+---
+
+## Daftar Isi
+
+- [1. Struktur](#1-struktur)
+- [2. Setup](#2-setup)
+- [3. Training Model](#3-training-model)
+- [4. Menjalankan Service](#4-menjalankan-service)
+- [5. Endpoint Parse Transaksi (Singular)](#5-endpoint-post-apiv1parse-transaction-singular)
+- [5b. Endpoint Parse Transaksi (Multi-Tanggal)](#5b-endpoint-post-apiv1parse-transactions-multi-tanggal)
+- [6. Endpoint Chat](#6-endpoint-post-apiv1chat)
+- [7. Notebook](#7-notebook)
+- [8. Tests](#8-tests)
+- [9. Catatan & Batasan](#9-catatan--batasan)
+- [10. Deployment & Hosting](#10-deployment--hosting)
+- [11. Troubleshooting](#11-troubleshooting)
+- [12. Keamanan](#12-keamanan)
+- [13. Dokumentasi Terkait](#13-dokumentasi-terkait)
+
 ---
 
 ## 1. Struktur
@@ -17,7 +38,7 @@ Ekstraksi nama item, kuantitas, harga, tanggal, nominal pengeluaran, dan kategor
 ```text
 ai-service/
 ├── app/
-│   ├── api/v1/                 # Endpoint FastAPI (/health, /parse-transaction, /chat)
+│   ├── api/v1/                 # Endpoint FastAPI (health, parse-transaction(s), chat)
 │   ├── core/config.py          # Konfigurasi path & environment
 │   ├── ml/
 │   │   ├── catalog.py          # Load katalog menu
@@ -45,6 +66,14 @@ ai-service/
 
 ## 2. Setup
 
+### Prasyarat
+
+- **Python 3.12+**. Environment pengembangan saat ini memakai Python 3.15.2; `numpy 2.5.5` mensyaratkan Python >= 3.12.
+- pip dan virtual environment.
+- Tidak perlu API key untuk menjalankan fitur inti. `GEMINI_API_KEY` hanya diperlukan jika ingin chat berbasis Gemini.
+
+### Instalasi
+
 Dari root repository:
 
 ```bash
@@ -54,7 +83,25 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Konfigurasi Gemini bersifat opsional. Salin `.env.example` menjadi `.env` (atau `.env.local`) lalu isi:
+### Environment variables
+
+Salin `.env.example` menjadi `.env` (atau `.env.local`), lalu isi sesuai kebutuhan:
+
+| Variabel | Wajib? | Default | Deskripsi |
+|---|---|---|---|
+| `GEMINI_API_KEY` | Opsional | kosong | API key Gemini untuk chat. Tanpa ini, chat memakai fallback aturan. |
+| `GEMINI_MODEL` | Opsional | `gemini-3.5-flash-lite` | Model utama chat. |
+| `GEMINI_FALLBACK_MODEL` | Opsional | `gemini-3.8-flash` | Model cadangan saat model utama gagal/429. |
+| `GEMINI_TIMEOUT_SECONDS` | Opsional | `8` | Timeout satu percobaan Gemini. |
+| `GEMINI_TOTAL_BUDGET_SECONDS` | Opsional | `10` | Total anggaran chat; lebih rendah dari timeout proxy Next.js (12 detik). |
+| `GEMINI_MAX_OUTPUT_TOKENS` | Opsional | `512` | Batas output Gemini. |
+| `ALLOWED_ORIGINS` | Opsional | `http://localhost:3000,http://127.0.0.1:3000` | Origin yang diizinkan untuk CORS. Isi domain Vercel jika service dipanggil langsung dari browser. |
+| `TIMEZONE` | Opsional | `Asia/Jakarta` | Zona waktu parser tanggal. |
+| `MENU_MATCH_THRESHOLD` | Opsional | `80` | Ambang pencocokan nama menu (0–100). |
+| `AI_DATA_DIR` | Opsional | `ai-service/data` | Lokasi katalog dan dataset. |
+| `AI_MODEL_DIR` | Opsional | `ai-service/models` | Lokasi artifact model. |
+
+Contoh `.env`:
 
 ```bash
 GEMINI_API_KEY=
@@ -63,9 +110,13 @@ GEMINI_FALLBACK_MODEL=gemini-3.8-flash
 GEMINI_TIMEOUT_SECONDS=8
 GEMINI_TOTAL_BUDGET_SECONDS=10
 GEMINI_MAX_OUTPUT_TOKENS=512
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+TIMEZONE=Asia/Jakarta
 ```
 
 Tanpa `GEMINI_API_KEY`, endpoint chat tetap merespons memakai fallback aturan.
+
+### Export ulang katalog
 
 Export ulang katalog menu jika `src/lib/menu-seed-data.ts` berubah:
 
@@ -457,7 +508,7 @@ cd ai-service
 pytest -q
 ```
 
-Cakupan tes:
+Saat ini service AI memiliki **96 test**. Cakupan tes:
 
 - format uang (`Rp35.000`, `35rb`, `35k`, `35000`),
 - kuantitas (`2x`, `dua`, `3 porsi`),
@@ -480,5 +531,180 @@ Cakupan tes:
 - Teks penjualan campuran (misalnya minuman + makanan) hanya memiliki satu `predicted_category`. Nilai ini adalah prediksi untuk keseluruhan kalimat; kategori tiap item tetap diambil dari katalog saat disimpan.
 - Endpoint chat memakai Gemini dengan fallback aturan. Simpan `GEMINI_API_KEY` di `.env` atau `.env.local`; jangan commit file tersebut. Tanpa API key, chat tetap berjalan memakai fallback.
 - Model default adalah `gemini-3.5-flash-lite` dengan cadangan `gemini-3.8-flash`. Jika sebuah model dihentikan oleh Google, perbarui `GEMINI_MODEL`/`GEMINI_FALLBACK_MODEL`; fallback aturan tetap menjaga endpoint merespons.
-- Gemini 3.x tidak memakai `temperature`, `top_p`, atau `top_k`; konfigurasi thinking memakai `thinking_level=LOW` agar kompatibel dengan model utama dan cadangan.
+- Gemini 3.x tidak memakai `temperature`, `top_p`, atau `top_k`. Model utama memakai `thinking_level=MINIMAL` (level terendah yang didukung model utama); model cadangan memakai `LOW` karena menolak `MINIMAL`.
 - Model artifact dibuat ulang dengan `python scripts/train_model.py`; jangan mengedit `model_metadata.json` secara manual.
+- Service ini tidak menyimpan data transaksi. Data bisnis tetap disimpan oleh Next.js/Supabase; service AI hanya memproses teks dan mengembalikan draft.
+- Service AI belum memiliki autentikasi bawaan. Jika endpoint diekspos ke publik, tambahkan token/rate limit di depan service.
+
+---
+
+## 10. Deployment & Hosting
+
+Service AI adalah aplikasi Python/FastAPI yang berjalan sebagai proses server. Service ini **tidak ikut di-deploy ke project Next.js di Vercel**. Deploy ke host Python terpisah, lalu hubungkan lewat `AI_SERVICE_URL` di Vercel.
+
+### 10.1 Pilihan hosting
+
+| Host | Gratis permanen? | RAM | Tidur / cold start | Catatan |
+|---|---:|---:|---|---|
+| **Hugging Face Spaces (Docker, CPU Basic)** | Ya | 16 GB | Tidur setelah ±48 jam tidak aktif | Paling cocok untuk beban ML; Space publik; port 7860 |
+| **Render Free Web Service** | Ya | 512 MB | Tidur setelah ±15 menit | Mudah; RAM ketat; cold start bisa 30–60 detik |
+| **Koyeb Free** | Ya (cek kuota) | 512 MB | Scale-to-zero | Ringan; cocok untuk demo kecil |
+| **Google Cloud Run** | Kuota gratis bulanan | 512 MB–1 GB | Scale-to-zero | Perlu billing account/kartu |
+| **Oracle Cloud Always Free** | Ya | Hingga 24 GB (ARM) | Tidak tidur | Perlu kartu verifikasi; setup lebih berat |
+| **Railway** | Tidak permanen | Bervariasi | Bervariasi | Trial credit; setelah habis perlu bayar |
+| **Vercel Python Functions** | Ya (Hobby) | Terbatas | Cold start | Perlu project terpisah dan adaptasi; tidak disarankan |
+
+> **Kombinasi full gratis:** Hugging Face Spaces CPU Basic untuk service AI, tanpa `GEMINI_API_KEY` (chat memakai fallback aturan). Jika memakai Gemini free tier, pantau kuota/rate limit.
+
+> Free tier bisa berubah. Cek ulang ketentuan provider sebelum demo.
+
+### 10.2 Hugging Face Spaces (rekomendasi gratis)
+
+1. Buat **New Space** → **Docker** → **CPU Basic**.
+2. Gunakan Space publik. Jangan menyimpan secret di repository.
+3. Tambahkan `Dockerfile` di folder `ai-service/`:
+
+```dockerfile
+FROM python:3.13-slim
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 7860
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+```
+
+> Sesuaikan tag Python dengan versi yang didukung dependency. Environment pengembangan memakai Python 3.15.2; jika `3.13-slim` tidak cocok, gunakan versi lain yang tersedia dan pastikan `pip install` berhasil.
+>
+> `requirements.txt` saat ini juga memuat dependency testing/notebook (`pytest`, `ipykernel`, dll.). Untuk image produksi yang lebih kecil, pisahkan dependency runtime dan development.
+
+4. Di **Settings → Variables and secrets**, tambahkan:
+
+```text
+GEMINI_API_KEY=<secret>
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_FALLBACK_MODEL=gemini-3.8-flash
+ALLOWED_ORIGINS=https://domain-vercel-kamu.vercel.app
+TIMEZONE=Asia/Jakarta
+```
+
+5. Tes health check:
+
+```bash
+curl https://<nama-space>.hf.space/api/v1/health
+```
+
+6. Isi `AI_SERVICE_URL` di Vercel dengan URL Space tersebut.
+
+Catatan:
+
+- Space publik berarti kode dan endpoint bisa dilihat orang. Gunakan **Secrets** untuk API key.
+- Free tier tidur setelah sekitar 48 jam tidak aktif.
+- Jangan commit `.env` atau file berisi secret.
+
+### 10.3 Render Free Web Service
+
+1. Buat **New Web Service** dari repository GitHub.
+2. **Root Directory:** `ai-service`.
+3. **Build Command:** `pip install -r requirements.txt`.
+4. **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+5. **Health Check Path:** `/api/v1/health`.
+6. Tambahkan environment variables seperti bagian 10.2.
+7. Deploy dan tes health check.
+
+Catatan:
+
+- RAM 512 MB bisa ketat saat model dan dependency dimuat. Pantau log OOM.
+- Service tidur setelah ±15 menit tidak aktif; request pertama bisa 30–60 detik.
+- Hangatkan service sebelum demo.
+
+### 10.4 Oracle Cloud Always Free
+
+Cocok jika ingin service selalu aktif:
+
+1. Buat VM Ampere A1 dengan konfigurasi Always Free.
+2. Install Python, clone repository, buat virtual environment, dan install `requirements.txt`.
+3. Jalankan service dengan systemd atau Docker.
+4. Pasang reverse proxy HTTPS (Nginx/Caddy).
+5. Isi `AI_SERVICE_URL` dengan domain HTTPS tersebut.
+
+Keunggulan: selalu aktif dan RAM besar. Kekurangan: setup, patching, dan monitoring menjadi tanggung jawab sendiri.
+
+### 10.5 Cloud Run, Railway, dan Vercel Python
+
+- **Cloud Run:** cocok jika sudah memakai Google Cloud. Perlu billing account dan container image.
+- **Railway:** mudah, tetapi bukan free tier permanen; trial credit akan habis.
+- **Vercel Python Functions:** perlu project terpisah, adapter `api/index.py`, rewrite, dan pengurangan dependency. Risiko bundle besar, cold start, dan batas durasi. Tidak disarankan untuk service ini.
+
+### 10.6 Menghubungkan ke Vercel
+
+Setelah service online:
+
+```text
+AI_SERVICE_URL=https://domain-service-ai
+NEXT_PUBLIC_AI_SERVICE_URL=https://domain-service-ai
+```
+
+Redeploy Vercel. Route proxy Next.js memakai timeout 12–15 detik; jika perlu, tambahkan `export const maxDuration = 30` pada route AI di Next.js dan pastikan batas Max Duration Vercel lebih besar.
+
+### 10.7 Checklist production service AI
+
+- [ ] `GET /api/v1/health` mengembalikan `status: "ok"` dan `model_loaded: true`.
+- [ ] Folder `models/` ikut ter-deploy.
+- [ ] `GEMINI_API_KEY` hanya ada di secret host.
+- [ ] `ALLOWED_ORIGINS` diisi domain Vercel jika dipanggil langsung dari browser.
+- [ ] Service tidak tidur saat demo (atau sudah dihangatkan).
+- [ ] Endpoint tidak diekspos tanpa proteksi jika dipakai untuk production.
+- [ ] Log tidak memuat API key atau payload sensitif.
+
+---
+
+## 11. Troubleshooting
+
+| Gejala | Penyebab | Solusi |
+|---|---|---|
+| Health check `degraded` / `model_loaded: false` | `best_model.joblib` atau metadata tidak ditemukan | Pastikan `models/` ikut ter-deploy dan `AI_MODEL_DIR` benar |
+| Service gagal start: `ModuleNotFoundError` | Dependency belum terpasang | Jalankan `pip install -r requirements.txt` di environment yang benar |
+| `Address already in use` | Port 8000 sudah dipakai | Hentikan proses lain atau pakai port berbeda |
+| Build gagal saat install `numpy`/`pandas` | Versi Python tidak didukung | Gunakan Python 3.12+ dan image yang sesuai |
+| Chat selalu fallback | `GEMINI_API_KEY` kosong atau model tidak tersedia | Isi API key, cek kuota/model, lihat log |
+| Gemini 429 | Kuota/rate limit | Tunggu, gunakan model cadangan, atau fallback aturan |
+| Chat timeout | Service lambat/cold start | Hangatkan service, naikkan timeout, cek koneksi |
+| CORS error | `ALLOWED_ORIGINS` tidak memuat domain | Tambahkan domain Vercel ke `ALLOWED_ORIGINS` |
+| Vercel 503 | `AI_SERVICE_URL` kosong/salah | Isi URL publik, redeploy Vercel |
+| Vercel 502 | Service AI error/HTTP non-200 | Cek log service AI dan health check |
+| Data draft tidak tersimpan | Draft `INCOMPLETE`/`OUT_OF_CONTEXT` | Perbaiki input, konfirmasi hanya draft valid |
+| Model salah memprediksi kategori | Dataset sintetis/kalimat baru | Perbaiki katalog/parser; tambahkan data training |
+
+---
+
+## 12. Keamanan
+
+- **Jangan commit secret.** `GEMINI_API_KEY` hanya di `.env`, secret host, atau environment variable.
+- **Jangan taruh API key di repository Hugging Face.** Gunakan **Settings → Secrets**.
+- **Service AI belum memiliki autentikasi bawaan.** Siapa pun yang tahu URL dapat memanggil endpoint. Untuk production, tambahkan shared token, verifikasi JWT Supabase, atau rate limit di depan service.
+- **Batasi CORS** dengan `ALLOWED_ORIGINS` jika service dipanggil langsung dari browser. Jika hanya lewat proxy Next.js, CORS tidak wajib, tetapi tetap batasi akses.
+- **Jangan log payload sensitif atau API key.** Service saat ini mencatat model, durasi, dan hasil, bukan payload/key.
+- **Model dan dataset bukan data bisnis.** Data transaksi tetap disimpan di Supabase oleh aplikasi Next.js.
+- **Pantau kuota Gemini.** Gunakan fallback aturan jika kuota habis.
+
+---
+
+## 13. Dokumentasi Terkait
+
+- [README utama](../README.md) — gambaran project, modul, setup, keamanan.
+- [Panduan Deployment](../docs/DEPLOYMENT.md) — deploy Vercel + Supabase + service AI, opsi gratis, troubleshooting.
+- [Panduan Pengguna](../docs/PANDUAN_PENGGUNA.md) — panduan non-teknis untuk pemilik/staf.
+- [Model Artifacts](./models/README.md) — file model dan cara membuat ulang.
+- [Katalog menu](./data/menu_catalog.json) — 57 item menu untuk service AI.
+- [Schema Supabase](../supabase/schema.sql) — tabel, grant, RLS.
+
+---
+
+*Terakhir diperbarui: 26 November 2026.*
